@@ -145,6 +145,58 @@
   /* Two highlight levels: a soft band marking the sentence being spoken,
      and a saturated mark on the exact word. The band gives the eye a place
      to land when it looks away and back; the word carries the position. */
+  /* Rendered Markdown. pre-wrap is right for plain text but would preserve
+     the source's own line breaks inside a paragraph, so it is dropped once
+     real block elements are doing the wrapping. */
+  #reader.rich { white-space: normal; }
+  #reader.rich > *:first-child { margin-top: 0; }
+  #reader.rich p { margin: 0 0 1.05em; }
+  #reader.rich h1, #reader.rich h2, #reader.rich h3,
+  #reader.rich h4, #reader.rich h5, #reader.rich h6 {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.3; letter-spacing: -.015em;
+    margin: 1.7em 0 .6em;
+  }
+  #reader.rich h1 { font-size: 1.55em; }
+  #reader.rich h2 { font-size: 1.3em; }
+  #reader.rich h3 { font-size: 1.12em; }
+  #reader.rich h4, #reader.rich h5, #reader.rich h6 { font-size: 1em; }
+  #reader.rich ul, #reader.rich ol { margin: 0 0 1.05em; padding-left: 1.5em; }
+  #reader.rich li { margin: .3em 0; }
+  #reader.rich li input[type=checkbox] { margin-right: .5em; accent-color: var(--accent); }
+  #reader.rich blockquote {
+    margin: 0 0 1.05em; padding: .1em 0 .1em 1.1em;
+    border-left: 3px solid var(--word); color: var(--muted);
+  }
+  #reader.rich blockquote p:last-child { margin-bottom: 0; }
+  #reader.rich a { color: var(--accent); text-underline-offset: 2px; }
+  #reader.rich code {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: .85em; background: var(--chip);
+    padding: .12em .38em; border-radius: 5px;
+  }
+  #reader.rich pre {
+    background: var(--chip); border-radius: 10px;
+    padding: 14px 16px; margin: 0 0 1.05em;
+    overflow-x: auto; font-size: .78em; line-height: 1.6;
+  }
+  #reader.rich pre code { background: none; padding: 0; font-size: 1em; }
+  #reader.rich img {
+    display: block; max-width: 100%; height: auto;
+    border-radius: 10px; margin: 1.2em 0;
+  }
+  #reader.rich hr { border: 0; border-top: 1px solid var(--line); margin: 1.8em 0; }
+  /* Wide tables scroll inside their own box rather than the page. */
+  #reader.rich table {
+    display: block; width: 100%; overflow-x: auto;
+    border-collapse: collapse; margin: 0 0 1.05em; font-size: .84em;
+  }
+  #reader.rich th, #reader.rich td {
+    border: 1px solid var(--line); padding: 7px 11px;
+    text-align: left; vertical-align: top;
+  }
+  #reader.rich th { background: var(--chip); font-weight: 600; }
+
   .w { cursor: pointer; padding: 2px 0; border-radius: 3px; }
 
   /* Words are separate spans, so a plain background leaves the spaces
@@ -573,7 +625,18 @@ class Renderer {
     }
 
     this.el.replaceChildren(frag);
+    this.el.classList.remove("rich");
     this.active = -1;
+    this._sFrom = this._sTo = null;
+  }
+
+  /** Take an already-built tree whose words buildFromDom has wrapped. */
+  adopt(tree, spans) {
+    this.el.replaceChildren(tree);
+    this.el.classList.add("rich");
+    this.spans = spans;
+    this.active = -1;
+    this._sFrom = this._sTo = null;
   }
 
   highlight(index, { scroll = true } = {}) {
@@ -627,6 +690,331 @@ class Renderer {
     this.active = -1;
     this._sFrom = this._sTo = null;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 3b. MARKDOWN -> DOM
+ *
+ * Renders Markdown as real elements instead of flattening it to text, so
+ * headings, emphasis, lists, tables and images survive into the reader.
+ *
+ * Nodes are built with createElement and textContent throughout, never
+ * innerHTML, so a document cannot inject markup or script. Raw HTML in the
+ * source is therefore shown as literal text rather than executed, and link
+ * and image URLs are restricted to schemes that cannot run code.
+ * ------------------------------------------------------------------ */
+
+const SAFE_LINK = /^(?:https?:|mailto:)/i;
+const SAFE_IMAGE = /^(?:https?:|data:image\/)/i;
+
+function elText(tag, text) {
+  const e = document.createElement(tag);
+  e.textContent = text;
+  return e;
+}
+
+function inlineInto(parent, text) {
+  for (const node of inlineToNodes(text)) parent.appendChild(node);
+  return parent;
+}
+
+function wrapInline(tag, inner) {
+  return inlineInto(document.createElement(tag), inner);
+}
+
+function linkNode(label, href) {
+  const a = document.createElement("a");
+  if (SAFE_LINK.test(href)) {
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+  }
+  return inlineInto(a, label);
+}
+
+function imageNode(alt, src) {
+  if (!SAFE_IMAGE.test(src)) return document.createTextNode(alt);
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = alt;
+  img.loading = "lazy";
+  return img;
+}
+
+/* Ordered by precedence. Each rule matches once; the scanner below picks
+   whichever rule matches earliest in the remaining text. */
+const INLINE_RULES = [
+  { re: /\\([\\`*_{}\[\]()#+\-.!>~|])/, make: (m) => document.createTextNode(m[1]) },
+  { re: /(`+)([\s\S]*?)\1/, make: (m) => elText("code", m[2].trim()) },
+  { re: /!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => imageNode(m[1], m[2]) },
+  { re: /\[([^\]]+)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => linkNode(m[1], m[2]) },
+  { re: /<((?:https?|mailto):[^>\s]+)>/, make: (m) => linkNode(m[1], m[1]) },
+  {
+    re: /(\*\*\*|___)(\S(?:[\s\S]*?\S)?)\1/,
+    make: (m) => {
+      const strong = document.createElement("strong");
+      strong.appendChild(wrapInline("em", m[2]));
+      return strong;
+    },
+  },
+  { re: /(\*\*|__)(\S(?:[\s\S]*?\S)?)\1/, make: (m) => wrapInline("strong", m[2]) },
+  { re: /~~([\s\S]+?)~~/, make: (m) => wrapInline("del", m[1]) },
+  { re: /\*(\S(?:[^*\n]*?\S)?)\*/, make: (m) => wrapInline("em", m[1]) },
+  {
+    // Underscore emphasis only at word boundaries, so snake_case survives.
+    re: /(^|[^A-Za-z0-9_])_(\S(?:[^_\n]*?\S)?)_(?![A-Za-z0-9])/,
+    make: (m) => {
+      const frag = document.createDocumentFragment();
+      if (m[1]) frag.appendChild(document.createTextNode(m[1]));
+      frag.appendChild(wrapInline("em", m[2]));
+      return frag;
+    },
+  },
+];
+
+function inlineToNodes(text) {
+  const out = [];
+  let rest = String(text);
+  let guard = 0;
+
+  while (rest && guard++ < 10000) {
+    let best = null;
+    for (const rule of INLINE_RULES) {
+      const m = rule.re.exec(rest);
+      if (m && (!best || m.index < best.m.index)) best = { m, rule };
+    }
+    if (!best) break;
+
+    if (best.m.index > 0) out.push(document.createTextNode(rest.slice(0, best.m.index)));
+    out.push(best.rule.make(best.m));
+    rest = rest.slice(best.m.index + best.m[0].length);
+  }
+
+  if (rest) out.push(document.createTextNode(rest));
+  return out;
+}
+
+const LIST_ITEM = /^([ \t]*)([-*+]|\d+[.)])[ \t]+(.*)$/;
+
+function markdownToDom(src) {
+  const root = document.createElement("div");
+  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
+  const blank = (s) => !s || !s.trim();
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (blank(line)) { i++; continue; }
+
+    const fence = line.match(/^[ \t]*(```|~~~)/);
+    if (fence) {
+      const marker = fence[1];
+      const body = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith(marker)) body.push(lines[i++]);
+      i++;                                   // step past the closing fence
+      const pre = document.createElement("pre");
+      pre.appendChild(elText("code", body.join("\n")));
+      root.appendChild(pre);
+      continue;
+    }
+
+    if (/^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(line)) {
+      root.appendChild(document.createElement("hr"));
+      i++; continue;
+    }
+
+    const atx = line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (atx) {
+      root.appendChild(wrapInline("h" + atx[1].length, atx[2]));
+      i++; continue;
+    }
+
+    const next = lines[i + 1];
+    if (next && /^ {0,3}=+\s*$/.test(next)) {
+      root.appendChild(wrapInline("h1", line.trim())); i += 2; continue;
+    }
+    if (next && /^ {0,3}-+\s*$/.test(next) && !LIST_ITEM.test(line)) {
+      root.appendChild(wrapInline("h2", line.trim())); i += 2; continue;
+    }
+
+    if (/^ {0,3}>/.test(line)) {
+      const body = [];
+      while (i < lines.length && /^ {0,3}>/.test(lines[i])) {
+        body.push(lines[i].replace(/^ {0,3}> ?/, ""));
+        i++;
+      }
+      const quote = document.createElement("blockquote");
+      quote.appendChild(markdownToDom(body.join("\n")));
+      root.appendChild(quote);
+      continue;
+    }
+
+    const isRow = (s) => /^[ \t]*\|.*\|[ \t]*$/.test(s);
+    if (isRow(line) && next &&
+        /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(next)) {
+      const cells = (s) => s.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const table = document.createElement("table");
+      const head = document.createElement("tr");
+      for (const c of cells(line)) head.appendChild(wrapInline("th", c));
+      const thead = document.createElement("thead");
+      thead.appendChild(head);
+      table.appendChild(thead);
+
+      i += 2;
+      const tbody = document.createElement("tbody");
+      while (i < lines.length && isRow(lines[i])) {
+        const tr = document.createElement("tr");
+        for (const c of cells(lines[i])) tr.appendChild(wrapInline("td", c));
+        tbody.appendChild(tr);
+        i++;
+      }
+      table.appendChild(tbody);
+      root.appendChild(table);
+      continue;
+    }
+
+    const item = line.match(LIST_ITEM);
+    if (item) {
+      const ordered = /\d/.test(item[2]);
+      const list = document.createElement(ordered ? "ol" : "ul");
+
+      while (i < lines.length) {
+        const m = lines[i].match(LIST_ITEM);
+        if (!m || /\d/.test(m[2]) !== ordered) break;
+
+        const itemLines = [m[3]];
+        i++;
+        while (i < lines.length && !blank(lines[i]) && !LIST_ITEM.test(lines[i])) {
+          itemLines.push(lines[i].replace(/^ {0,4}/, ""));
+          i++;
+        }
+
+        const li = document.createElement("li");
+        let content = itemLines.join("\n");
+
+        const task = content.match(/^\[([ xX])\][ \t]+([\s\S]*)$/);
+        if (task) {
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.disabled = true;
+          box.checked = /[xX]/.test(task[1]);
+          li.appendChild(box);
+          content = task[2];
+        }
+
+        inlineInto(li, content);
+        list.appendChild(li);
+
+        // A blank line between items is still one list, so look past it.
+        let peek = i;
+        while (peek < lines.length && blank(lines[peek])) peek++;
+        if (peek < lines.length && LIST_ITEM.test(lines[peek])) { i = peek; continue; }
+        break;
+      }
+
+      root.appendChild(list);
+      continue;
+    }
+
+    const para = [];
+    while (i < lines.length && !blank(lines[i]) &&
+           !/^ {0,3}(#{1,6}\s|>|```|~~~)/.test(lines[i]) && !LIST_ITEM.test(lines[i])) {
+      para.push(lines[i]);
+      i++;
+    }
+    if (para.length) root.appendChild(wrapInline("p", para.join("\n")));
+    else i++;
+  }
+
+  return root;
+}
+
+/* ------------------------------------------------------------------ *
+ * 3c. DOM -> WORD SPANS + SPOKEN TEXT
+ *
+ * One walk produces both halves at once: the rendered tree gets its words
+ * wrapped in spans, and the string that will actually be spoken is
+ * accumulated alongside. Token offsets index into that string, so the
+ * timing track works exactly as it does for plain text and nothing
+ * downstream can tell the difference.
+ * ------------------------------------------------------------------ */
+
+const BLOCK_TAGS = new Set([
+  "P","H1","H2","H3","H4","H5","H6","LI","BLOCKQUOTE",
+  "TR","TABLE","UL","OL","HR","PRE","DIV","FIGCAPTION",
+]);
+
+// Code blocks are displayed but not read aloud; source read as prose is
+// unpleasant and it would dominate the timing of a technical document.
+const UNSPOKEN_TAGS = new Set(["PRE"]);
+
+// Cells need a pause between them or a row is spoken as one run-on word
+// ("Col ACol B"), but a paragraph break between every cell is too much.
+const CELL_TAGS = new Set(["TD", "TH"]);
+
+function buildFromDom(root) {
+  const tokens = [];
+  const spans = [];
+  let spoken = "";
+
+  const endBlock = () => {
+    if (spoken && !/\n\n$/.test(spoken)) spoken += "\n\n";
+  };
+
+  function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue;
+      if (!text) return;
+
+      const base = spoken.length;
+      const frag = document.createDocumentFragment();
+      let cursor = 0;
+      let m;
+
+      WORD_RE.lastIndex = 0;
+      while ((m = WORD_RE.exec(text)) !== null) {
+        if (m.index > cursor) {
+          frag.appendChild(document.createTextNode(text.slice(cursor, m.index)));
+        }
+        const span = document.createElement("span");
+        span.className = "w";
+        span.dataset.i = String(tokens.length);
+        span.textContent = m[0];
+        tokens.push({
+          index: tokens.length,
+          text: m[0],
+          start: base + m.index,
+          end: base + m.index + m[0].length,
+        });
+        spans.push(span);
+        frag.appendChild(span);
+        cursor = m.index + m[0].length;
+      }
+      if (cursor < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(cursor)));
+      }
+
+      node.replaceWith(frag);
+      spoken += text;
+      return;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    if (UNSPOKEN_TAGS.has(node.tagName)) { endBlock(); return; }
+
+    for (const kid of [...node.childNodes]) walk(kid);
+
+    if (CELL_TAGS.has(node.tagName)) {
+      if (spoken && !/[\s,]$/.test(spoken)) spoken += ", ";
+    } else if (BLOCK_TAGS.has(node.tagName)) {
+      endBlock();
+    }
+  }
+
+  walk(root);
+  return { text: spoken, tokens, spans };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1030,9 +1418,20 @@ const app = {
   renderer: new Renderer(el.reader),
   engine: null,
 
-  load(text) {
-    this.text = text;
-    this.tokens = tokenize(text);
+  /** `tree` is a rendered Markdown DOM; without it, text renders flat. */
+  load(text, tree = null) {
+    if (tree) {
+      const built = buildFromDom(tree);
+      this.text = built.text;
+      this.tokens = built.tokens;
+      this.renderer.adopt(tree, built.spans);
+    } else {
+      this.text = text;
+      this.tokens = tokenize(text);
+      this.renderer.render(text, this.tokens);
+    }
+
+    text = this.text;
     this.chunks = chunkText(text);
     this.tokensByChunk = this.chunks.map(c => {
       const lo = c.charOffset, hi = c.charOffset + c.text.length;
@@ -1049,7 +1448,6 @@ const app = {
     this.sentenceOfToken = sentences.ofToken;
     this.sentenceRanges = sentences.ranges;
 
-    this.renderer.render(text, this.tokens);
     el.wordCount.textContent = `${this.tokens.length.toLocaleString()} words`;
     updateProgress(-1);
   },
@@ -1264,8 +1662,9 @@ el.clean.addEventListener("change", () => {
   if (!app.raw) return;
   app.engine?.stop();
   app.renderer.clear();
-  app.load(prepareText(app.raw.text, app.raw));
-  toast(el.clean.checked ? "Markup cleaned" : "Showing raw text");
+  const doc = prepareDoc(app.raw.text, app.raw);
+  app.load(doc.text, doc.tree);
+  toast(el.clean.checked ? "Formatting rendered" : "Showing raw source");
 });
 
 /* ------------------------------------------------------------------ *
@@ -1359,11 +1758,17 @@ function looksLikeMarkdown(s) {
 
 /** Every input path funnels through here, so pasted and typed Markdown is
  *  cleaned exactly like a dropped .md file. */
-function prepareText(raw, { forceMarkdown = false, cleanable = true } = {}) {
-  if (!cleanable || !el.clean.checked) return raw;
-  if (!forceMarkdown && !looksLikeMarkdown(raw)) return raw;
+function prepareDoc(raw, { forceMarkdown = false, cleanable = true } = {}) {
+  if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
+  if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
+
+  const tree = markdownToDom(raw);
+  if (tree.childNodes.length) return { text: null, tree };
+
+  // Nothing parsed into blocks. Fall back to stripping the syntax so the
+  // symbols still are not read aloud, and never hand back an empty document.
   const cleaned = stripMarkdown(raw);
-  return cleaned.trim() ? cleaned : raw;   // never hand back an empty document
+  return { text: cleaned.trim() ? cleaned : raw, tree: null };
 }
 
 function toast(msg, ms = 2600) {
@@ -1557,7 +1962,8 @@ function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "
   app.raw = { text: raw, forceMarkdown, cleanable };
   app.engine?.stop();
   app.renderer.clear();
-  app.load(prepareText(raw, { forceMarkdown, cleanable }));
+  const doc = prepareDoc(raw, { forceMarkdown, cleanable });
+  app.load(doc.text, doc.tree);
   setSource(label);
   toast(`Loaded ${label}${note}`);
 }
