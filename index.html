@@ -122,7 +122,7 @@
      between them doesn't shift the layout. Wide enough to actually use the
      screen; capped because past roughly 85 characters a line the eye loses
      its place on the return sweep. Tune --measure to taste. */
-  :root { --measure: 940px; }
+  :root { --measure: clamp(900px, 72vw, 1000px); }
 
   main { padding: 24px clamp(12px, 3vw, 28px) 190px; }
 
@@ -308,10 +308,26 @@
   }
   #toast.on { opacity: 1; }
 
+  /* On a phone the sheet metaphor just wastes the width the text needs, so
+     the panel goes full-bleed: no gutters, no radius, no shadow, and tall
+     enough to cover the screen even when the document is short. */
   @media (max-width: 640px) {
-    .paper { border-radius: 12px; }   /* padding is handled by the clamps */
+    main { padding: 0 0 190px; }
+    .paper {
+      max-width: none;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 22px 20px 40px;
+      min-height: calc(100vh - 58px);
+      min-height: calc(100dvh - 58px);
+    }
+    #editor {
+      max-width: none;
+      border-radius: 0;
+      border-left: 0; border-right: 0;
+      min-height: 70vh;
+    }
     .tb-title { max-width: 38vw; }
-    main { padding-bottom: 200px; }
   }
 </style>
 
