@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Waveform bars over a baseline: speech above, a line of text below.
+     Drawn entirely as vectors so the icon needs no bitmap assets. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:fillColor="#2F4BF0" android:pathData="M34,42 h5 v24 h-5 z" />
+    <path android:fillColor="#2F4BF0" android:pathData="M44,34 h5 v40 h-5 z" />
+    <path android:fillColor="#2F4BF0" android:pathData="M54,26 h5 v56 h-5 z" />
+    <path android:fillColor="#2F4BF0" android:pathData="M64,34 h5 v40 h-5 z" />
+    <path android:fillColor="#2F4BF0" android:pathData="M74,42 h5 v24 h-5 z" />
+</vector>

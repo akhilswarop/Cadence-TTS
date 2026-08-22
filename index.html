@@ -821,6 +821,148 @@ class WebSpeechEngine {
 }
 
 /* ------------------------------------------------------------------ *
+ * 4b. ENGINE — Android native TTS
+ *
+ * Android WebView does not implement the Web Speech API, so inside the APK
+ * the browser engine simply is not there. The platform's own TextToSpeech
+ * is used instead, reached through the Java bridge in TtsBridge.java.
+ *
+ * What it gives back is better than Web Speech for this app's purposes:
+ * onRangeStart reports the character range of every word, always, with no
+ * estimator fallback needed.
+ *
+ * Two platform differences are handled here rather than leaking upward:
+ *   - TextToSpeech has no pause. Pausing stops playback and remembers the
+ *     position; resuming re-speaks from that word.
+ *   - Rate applies per utterance, so a rate change restarts from the
+ *     current word — the same behaviour the Web Speech engine has.
+ * ------------------------------------------------------------------ */
+
+class AndroidTtsEngine {
+  constructor({ onWord, onStateChange, onTimingMode, onDone }) {
+    this.onWord = onWord;
+    this.onStateChange = onStateChange;
+    this.onTimingMode = onTimingMode;
+    this.onDone = onDone;
+
+    this.native = window.AndroidTTS;
+    this.chunks = [];
+    this.rate = 1;
+    this.voice = null;
+    this.state = "idle";
+    this.generation = 0;
+    this._lastChar = 0;
+
+    // Single hub the Java side calls into, routed to whichever instance
+    // is current.
+    window.__androidTts = {
+      on: (type, payload) => this._handle(type, payload),
+    };
+  }
+
+  static get available() {
+    return typeof window !== "undefined" && typeof window.AndroidTTS !== "undefined";
+  }
+
+  _handle(type, payload) {
+    if (type === "ready") {
+      this.onReady?.(payload.ok);
+      return;
+    }
+
+    if (type === "range") {
+      const chunk = this.chunks[Number(payload.id)];
+      if (!chunk) return;
+      this._lastChar = chunk.charOffset + payload.start;
+      this.onTimingMode?.("native");   // ranges are always real here
+      this.onWord(this._lastChar);
+      return;
+    }
+
+    if (type === "done") {
+      // The queue is finished only when the final chunk reports done.
+      if (Number(payload.id) === this.chunks.length - 1 && this.state === "playing") {
+        this._setState("idle");
+        this.onDone?.();
+      }
+      return;
+    }
+
+    if (type === "error" && this.state === "playing") {
+      this._setState("idle");
+    }
+  }
+
+  speak(chunks, { startIndex = 0 } = {}) {
+    this.native.stop();
+    this.generation++;
+    this.chunks = chunks;
+    this._setState("playing");
+
+    // Hand the whole queue to the platform and let it run; the utterance id
+    // is the chunk index, which is what maps a range back to its chunk.
+    for (let i = startIndex; i < chunks.length; i++) {
+      this.native.speak(chunks[i].text, String(i), this.rate);
+    }
+  }
+
+  /** No native pause exists, so stop and remember where we were. */
+  pause() {
+    if (this.state !== "playing") return;
+    this.native.stop();
+    this._setState("paused");
+  }
+
+  resume() {
+    if (this.state !== "paused") return;
+    this._resumeFrom(this._lastChar);
+  }
+
+  _resumeFrom(absoluteChar) {
+    let ci = this.chunks.findIndex(
+      (c) => absoluteChar >= c.charOffset && absoluteChar < c.charOffset + c.text.length
+    );
+    if (ci < 0) ci = 0;
+
+    const chunk = this.chunks[ci];
+    const local = Math.max(0, absoluteChar - chunk.charOffset);
+
+    // Re-queue with the current chunk trimmed to the remembered word, so
+    // resuming does not repeat the sentence from its beginning.
+    const queue = [
+      { text: chunk.text.slice(local), charOffset: chunk.charOffset + local },
+      ...this.chunks.slice(ci + 1),
+    ];
+    this.speak(queue, { startIndex: 0 });
+  }
+
+  stop() {
+    this.generation++;
+    this._lastChar = 0;
+    this.native.stop();
+    this._setState("idle");
+  }
+
+  setRate(rate) {
+    this.rate = rate;
+    if (this.state === "playing") this._resumeFrom(this._lastChar);
+  }
+
+  setVoiceByName(name) {
+    try { this.native.setVoice(name); } catch (_) {}
+  }
+
+  listVoices() {
+    try { return JSON.parse(this.native.voices() || "[]"); } catch (_) { return []; }
+  }
+
+  _setState(s) {
+    this.state = s;
+    this.onStateChange?.(s);
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * 5. APP
  * ------------------------------------------------------------------ */
 
@@ -976,12 +1118,19 @@ function togglePlayback() {
   else app.engine.speak(app.chunks, { startIndex: 0, tokensByChunk: app.tokensByChunk });
 }
 
-if (!WebSpeechEngine.available) {
+/* Prefer the native engine when running inside the Android app, since the
+   WebView has no Web Speech API at all. Everything downstream is identical:
+   both classes are producers of the same timing track. */
+const Engine =
+  AndroidTtsEngine.available ? AndroidTtsEngine :
+  WebSpeechEngine.available ? WebSpeechEngine : null;
+
+if (!Engine) {
   el.unsupported.classList.remove("hidden");
   el.play.disabled = true;
   el.stop.disabled = true;
 } else {
-  app.engine = new WebSpeechEngine({
+  app.engine = new Engine({
     onWord: (c) => app.onWord(c),
     onStateChange: setPlayLabel,
     // Surfaced only when the highlight is running on an estimate, because
@@ -995,28 +1144,56 @@ if (!WebSpeechEngine.available) {
     },
   });
 
-  // Voices populate asynchronously — the first getVoices() call returns [].
-  function loadVoices() {
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return;
-    el.voice.replaceChildren(
-      ...voices.map((v, i) => {
-        const o = document.createElement("option");
-        o.value = i;
-        o.textContent = `${v.name}${v.localService ? "" : " (network)"}`;
-        return o;
-      })
-    );
-    const preferred = voices.findIndex(v => v.localService && /^en/i.test(v.lang));
-    el.voice.value = preferred >= 0 ? preferred : 0;
-    app.engine.voice = voices[el.voice.value];
-  }
-  loadVoices();
-  speechSynthesis.addEventListener("voiceschanged", loadVoices);
+  if (Engine === AndroidTtsEngine) {
+    // The bridge reports when the platform engine has finished initialising;
+    // asking for voices before that returns nothing.
+    const fillAndroidVoices = () => {
+      const voices = app.engine.listVoices();
+      if (!voices.length) return;
+      el.voice.replaceChildren(
+        ...voices.map((v) => {
+          const o = document.createElement("option");
+          o.value = v.name;
+          o.textContent = `${v.locale}${v.network ? " (network)" : ""}`;
+          return o;
+        })
+      );
+      const local = voices.findIndex((v) => !v.network && /^en/i.test(v.locale));
+      el.voice.value = voices[local >= 0 ? local : 0].name;
+      app.engine.setVoiceByName(el.voice.value);
+    };
 
-  el.voice.addEventListener("change", () => {
-    app.engine.voice = speechSynthesis.getVoices()[el.voice.value];
-  });
+    app.engine.onReady = fillAndroidVoices;
+    if (window.AndroidTTS.isReady()) fillAndroidVoices();
+
+    el.voice.addEventListener("change", () => {
+      app.engine.setVoiceByName(el.voice.value);
+    });
+  } else {
+    // Voices populate asynchronously — the first getVoices() call returns [].
+    const loadVoices = () => {
+      const voices = speechSynthesis.getVoices();
+      if (!voices.length) return;
+      el.voice.replaceChildren(
+        ...voices.map((v, i) => {
+          const o = document.createElement("option");
+          o.value = i;
+          o.textContent = `${v.name}${v.localService ? "" : " (network)"}`;
+          return o;
+        })
+      );
+      const preferred = voices.findIndex(v => v.localService && /^en/i.test(v.lang));
+      el.voice.value = preferred >= 0 ? preferred : 0;
+      app.engine.voice = voices[el.voice.value];
+    };
+
+    loadVoices();
+    speechSynthesis.addEventListener("voiceschanged", loadVoices);
+
+    el.voice.addEventListener("change", () => {
+      app.engine.voice = speechSynthesis.getVoices()[el.voice.value];
+    });
+  }
 
   el.play.addEventListener("click", () => {
     // Drop focus, or the button keeps Space to itself and the global

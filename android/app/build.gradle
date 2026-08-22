@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.cadence.tts'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.cadence.tts"
+        // onRangeStart, which reports word boundaries, landed in API 26.
+        // Without it there is no timing track and no word highlighting.
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+}
+
+/*
+ * The web app has exactly one source of truth: ../index.html at the repo
+ * root. Copying it in at build time means the APK can never drift from the
+ * browser version, which is the usual failure mode for wrapped web apps.
+ */
+tasks.register('syncWebApp', Copy) {
+    from rootProject.file('../index.html')
+    into layout.projectDirectory.dir('src/main/assets')
+}
+
+tasks.named('preBuild') {
+    dependsOn 'syncWebApp'
+}

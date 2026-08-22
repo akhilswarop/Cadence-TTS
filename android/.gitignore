@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Copied in at build time from ../index.html by the syncWebApp task.
+app/src/main/assets/index.html

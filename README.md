@@ -124,6 +124,51 @@ tokenizer or the engine.
       range instead of bridging gaps with box-shadow
 - [ ] Vendor pdf.js locally so PDFs work offline too
 
+## Android
+
+`android/` holds a native Android wrapper. It is not a plain WebView port,
+because it could not be: **Android WebView does not implement the Web Speech
+API**, so the engine the browser build relies on is simply absent there. Wrap
+`index.html` in a stock WebView and you get an app that renders perfectly and
+cannot speak.
+
+So the app bridges to Android's own `TextToSpeech` instead. That turns out to
+be the better fit: `UtteranceProgressListener.onRangeStart` reports the
+character range of every word as it is spoken, which is precisely the timing
+track the renderer already consumes. `AndroidTtsEngine` in `index.html` is a
+second producer next to `WebSpeechEngine`, and nothing downstream changes —
+no estimator fallback is needed, because ranges are always real.
+
+Two platform gaps are absorbed by the engine rather than leaked upward:
+`TextToSpeech` has no pause, so pausing stops and remembers the position and
+resuming re-speaks from that word; and rate applies per utterance, so a rate
+change restarts from the current word.
+
+`minSdk` is 26 — `onRangeStart` landed there, and without it there is no word
+highlighting at all.
+
+There is one source of truth for the web app: the Gradle `syncWebApp` task
+copies `index.html` into assets at build time, so the APK cannot drift from
+the browser version.
+
+### Building
+
+The Gradle wrapper jar is a binary and is not committed, so generate it once:
+
+```bash
+cd android
+gradle wrapper          # or open the android/ folder in Android Studio, which does this on sync
+./gradlew assembleDebug
+```
+
+The APK lands in `android/app/build/outputs/apk/debug/`.
+
+Requires JDK 17+ and an Android SDK with platform 35. Note that PDF import
+fetches pdf.js from a CDN, so a PDF opened in the app needs a network
+connection; text and Markdown work fully offline. If you care about offline
+PDFs — or about the fact that a CDN script shares the page with a JavaScript
+bridge — vendor pdf.js into the assets instead.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
