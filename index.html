@@ -1,0 +1,879 @@
+<title>Cadence — TTS Reader</title>
+<style>
+  :root {
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --border: #e3ded6;
+    --text: #22201d;
+    --muted: #6f6963;
+    --accent: #b8552b;
+    --accent-soft: #fbe9df;
+    --spoken: #a8a29a;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171614;
+      --surface: #1f1e1b;
+      --border: #34322d;
+      --text: #eae7e1;
+      --muted: #9a938a;
+      --accent: #e8834f;
+      --accent-soft: #3a2419;
+      --spoken: #625c54;
+      --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.2);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171614;
+    --surface: #1f1e1b;
+    --border: #34322d;
+    --text: #eae7e1;
+    --muted: #9a938a;
+    --accent: #e8834f;
+    --accent-soft: #3a2419;
+    --spoken: #625c54;
+    --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.2);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .bar {
+    max-width: 820px; margin: 0 auto;
+    padding: 12px 20px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+
+  .brand {
+    font-weight: 600; font-size: 15px; letter-spacing: -.01em;
+    margin-right: auto; display: flex; align-items: center; gap: 8px;
+  }
+  .brand small { color: var(--muted); font-weight: 400; font-size: 12px; }
+
+  button {
+    font: inherit; font-size: 13px;
+    padding: 7px 13px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 500; min-width: 86px;
+  }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+  select, input[type=range] { font: inherit; font-size: 13px; }
+  select {
+    padding: 6px 8px; border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+    max-width: 190px;
+  }
+  label.ctl {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+  }
+  input[type=range] { width: 92px; accent-color: var(--accent); }
+
+  main { max-width: 820px; margin: 0 auto; padding: 32px 20px 45vh; }
+
+  #reader {
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-size: 20px;
+    line-height: 1.85;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .w {
+    border-radius: 4px;
+    padding: 1px 0;
+    transition: color .1s;
+    cursor: pointer;
+  }
+  .w:hover { text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+  .w.spoken { color: var(--spoken); }
+  .w.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    font-weight: 600;
+  }
+
+  #editor {
+    width: 100%; min-height: 320px;
+    padding: 16px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 13px; line-height: 1.6;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); color: var(--text);
+    resize: vertical;
+    box-shadow: var(--shadow);
+  }
+  .hidden { display: none !important; }
+
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(12px);
+    font-size: 12px; color: var(--muted);
+  }
+  .status {
+    max-width: 820px; margin: 0 auto; padding: 9px 20px;
+    display: flex; gap: 16px; align-items: center;
+  }
+  #progress {
+    flex: 1; height: 3px; border-radius: 2px;
+    background: var(--border); overflow: hidden;
+  }
+  #progressFill { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  .pill {
+    padding: 2px 8px; border-radius: 20px;
+    border: 1px solid var(--border); white-space: nowrap;
+  }
+  .pill.warn { border-color: var(--accent); color: var(--accent); }
+  .banner {
+    max-width: 820px; margin: 0 auto 20px;
+    padding: 12px 16px; border-radius: 8px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 13px; border: 1px solid var(--accent);
+  }
+
+  #drop {
+    position: fixed; inset: 0; z-index: 100;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+  }
+  #drop.on { opacity: 1; }
+  #drop div {
+    padding: 40px 56px; border-radius: 14px;
+    border: 2px dashed var(--accent); color: var(--accent);
+    background: var(--surface); font-size: 15px; font-weight: 500;
+    box-shadow: var(--shadow);
+  }
+
+  #toast {
+    position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%);
+    padding: 10px 16px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-size: 13px; box-shadow: var(--shadow);
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 200;
+  }
+  #toast.on { opacity: 1; }
+</style>
+
+<header>
+  <div class="bar">
+    <div class="brand">Cadence <small id="source">word-synced reader</small></div>
+    <button id="btnOpen">Open file</button>
+    <button id="btnPaste">Paste</button>
+    <button id="btnEdit">Edit text</button>
+    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,text/plain">
+    <select id="voice" title="Voice"></select>
+    <label class="ctl">Rate <input type="range" id="rate" min="0.5" max="5" step="0.1" value="1"><span id="rateVal">1.00×</span></label>
+    <label class="ctl"><input type="checkbox" id="autoscroll" checked> Follow</label>
+    <button id="btnStop">Stop</button>
+    <button id="btnPlay" class="primary">Play</button>
+  </div>
+</header>
+
+<main>
+  <div id="unsupported" class="banner hidden">
+    This browser doesn't expose the Web Speech API, so playback is unavailable.
+    Chrome, Edge, and Safari support it.
+  </div>
+  <textarea id="editor" class="hidden" spellcheck="false"></textarea>
+  <div id="reader"></div>
+</main>
+
+<div id="drop"><div>Drop a .txt or .md file to read it</div></div>
+<div id="toast"></div>
+
+<footer>
+  <div class="status">
+    <span id="wordCount">—</span>
+    <div id="progress"><div id="progressFill"></div></div>
+    <span id="timingMode" class="pill">idle</span>
+  </div>
+</footer>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * 1. TOKENIZER
+ *
+ * Splits text into words while preserving exact character offsets into
+ * the ORIGINAL string. Those offsets are the contract with the TTS
+ * engine: `onboundary` reports a charIndex, and we translate it back to
+ * a token through these offsets. If they drift, the highlight drifts.
+ * ------------------------------------------------------------------ */
+
+// A word is a run of letters (allowing internal apostrophes and hyphens,
+// so "don't" and "well-known" stay single tokens), or a run of digits
+// with internal separators so "1,234.56" doesn't fragment.
+const WORD_RE = /[\p{L}\p{M}]+(?:['’\-][\p{L}\p{M}]+)*|\p{N}+(?:[.,]\p{N}+)*/gu;
+
+function tokenize(text) {
+  const tokens = [];
+  let m;
+  WORD_RE.lastIndex = 0;
+  while ((m = WORD_RE.exec(text)) !== null) {
+    tokens.push({
+      index: tokens.length,
+      text: m[0],
+      start: m.index,
+      end: m.index + m[0].length,
+    });
+  }
+  return tokens;
+}
+
+/** Largest token index whose start is <= charPos. Binary search. */
+function tokenAtChar(tokens, charPos) {
+  let lo = 0, hi = tokens.length - 1, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (tokens[mid].start <= charPos) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. CHUNKER
+ *
+ * Long utterances are unreliable — Chrome in particular stops speaking
+ * after roughly 15 seconds. Splitting at sentence boundaries avoids that
+ * and gives natural pause points for seeking.
+ *
+ * Every chunk carries `charOffset`, its absolute position in the source.
+ * The engine reports offsets relative to the chunk; adding charOffset is
+ * what keeps highlighting aligned across the whole document.
+ * ------------------------------------------------------------------ */
+
+function chunkText(text, maxLen = 220) {
+  // Sentence-ish: run of non-terminators, terminators, optional closers.
+  const SENTENCE_RE = /[^.!?\n]*(?:[.!?]+['")\]”’]*|\n+|$)/gy;
+  const chunks = [];
+  let buffer = "", bufferStart = 0, pos = 0;
+
+  SENTENCE_RE.lastIndex = 0;
+  while (pos < text.length) {
+    SENTENCE_RE.lastIndex = pos;
+    const m = SENTENCE_RE.exec(text);
+    if (!m || m[0].length === 0) { pos++; continue; }
+    const sentence = m[0];
+    pos += sentence.length;
+
+    if (buffer && buffer.length + sentence.length > maxLen) {
+      chunks.push({ text: buffer, charOffset: bufferStart });
+      buffer = sentence;
+      bufferStart = pos - sentence.length;
+    } else {
+      if (!buffer) bufferStart = pos - sentence.length;
+      buffer += sentence;
+    }
+
+    // A single sentence longer than maxLen gets hard-split on whitespace
+    // so we never hand the engine an oversized utterance.
+    while (buffer.length > maxLen * 1.6) {
+      let cut = buffer.lastIndexOf(" ", maxLen);
+      if (cut <= 0) cut = maxLen;
+      chunks.push({ text: buffer.slice(0, cut), charOffset: bufferStart });
+      bufferStart += cut;
+      buffer = buffer.slice(cut);
+    }
+  }
+  if (buffer.trim()) chunks.push({ text: buffer, charOffset: bufferStart });
+  return chunks.filter(c => c.text.trim().length > 0);
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. RENDERER
+ *
+ * Word spans with the original inter-word text preserved verbatim, so
+ * the rendered document is character-identical to the source.
+ * ------------------------------------------------------------------ */
+
+class Renderer {
+  constructor(el) {
+    this.el = el;
+    this.spans = [];
+    this.active = -1;
+  }
+
+  render(text, tokens) {
+    const frag = document.createDocumentFragment();
+    this.spans = [];
+    let cursor = 0;
+
+    for (const tok of tokens) {
+      if (tok.start > cursor) {
+        frag.appendChild(document.createTextNode(text.slice(cursor, tok.start)));
+      }
+      const span = document.createElement("span");
+      span.className = "w";
+      span.dataset.i = tok.index;
+      span.textContent = tok.text;
+      frag.appendChild(span);
+      this.spans.push(span);
+      cursor = tok.end;
+    }
+    if (cursor < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+
+    this.el.replaceChildren(frag);
+    this.active = -1;
+  }
+
+  highlight(index, { scroll = true } = {}) {
+    if (index === this.active || index < 0 || index >= this.spans.length) return;
+
+    if (this.active >= 0) {
+      this.spans[this.active].classList.remove("active");
+    }
+    // Mark everything up to here as spoken, so progress reads at a glance
+    // even after a seek backwards.
+    for (let i = 0; i < this.spans.length; i++) {
+      this.spans[i].classList.toggle("spoken", i < index);
+    }
+
+    const span = this.spans[index];
+    span.classList.add("active");
+    this.active = index;
+
+    if (scroll) this._follow(span);
+  }
+
+  /** Only scroll when the word leaves a comfortable middle band. */
+  _follow(span) {
+    const r = span.getBoundingClientRect();
+    const top = window.innerHeight * 0.25;
+    const bottom = window.innerHeight * 0.68;
+    if (r.top < top || r.bottom > bottom) {
+      span.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  clear() {
+    if (this.active >= 0) this.spans[this.active].classList.remove("active");
+    this.spans.forEach(s => s.classList.remove("spoken"));
+    this.active = -1;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. ENGINE — Web Speech
+ *
+ * Produces a stream of absolute character positions as it speaks. This is
+ * the only engine-specific code in the app; anything that emits
+ * `onWord(absoluteCharIndex)` can replace it (Polly speech marks, Azure
+ * wordBoundary, a forced aligner) without the UI changing.
+ *
+ * Two failure modes are handled explicitly:
+ *   - `cancel()` fires `onend` in some browsers, which would otherwise
+ *     advance the queue. A generation counter guards against that.
+ *   - Chrome's network voices frequently never fire `onboundary`. If no
+ *     boundary arrives shortly after a chunk starts, an estimator takes
+ *     over so the highlight still moves. It is clearly labelled as
+ *     estimated, because it is a guess and shouldn't be mistaken for
+ *     real timing data.
+ * ------------------------------------------------------------------ */
+
+class WebSpeechEngine {
+  constructor({ onWord, onStateChange, onTimingMode, onDone }) {
+    this.onWord = onWord;
+    this.onStateChange = onStateChange;
+    this.onTimingMode = onTimingMode;
+    this.onDone = onDone;
+
+    this.synth = window.speechSynthesis;
+    this.generation = 0;
+    this.chunks = [];
+    this.cursor = 0;
+    this.rate = 1;
+    this.voice = null;
+    this.state = "idle";
+
+    this._raf = null;
+    this._estimateStart = 0;
+    this._estimateTokens = null;
+    this._pausedAt = 0;
+  }
+
+  static get available() {
+    return typeof window !== "undefined" && "speechSynthesis" in window;
+  }
+
+  speak(chunks, { startIndex = 0, tokensByChunk = [] } = {}) {
+    this.stop();
+    this.generation++;
+    this.chunks = chunks;
+    this.tokensByChunk = tokensByChunk;
+    this.cursor = startIndex;
+    this._setState("playing");
+    this._speakCurrent();
+  }
+
+  _speakCurrent() {
+    const gen = this.generation;
+    if (this.cursor >= this.chunks.length) {
+      this._setState("idle");
+      this.onDone?.();
+      return;
+    }
+
+    const chunk = this.chunks[this.cursor];
+    const u = new SpeechSynthesisUtterance(chunk.text);
+    if (this.voice) u.voice = this.voice;
+    u.rate = this.rate;
+
+    let sawBoundary = false;
+
+    u.onboundary = (e) => {
+      if (gen !== this.generation) return;
+      if (e.name && e.name !== "word") return;
+      if (!sawBoundary) {
+        sawBoundary = true;
+        this._stopEstimator();
+        this.onTimingMode?.("native");
+      }
+      this.onWord(chunk.charOffset + e.charIndex);
+    };
+
+    u.onstart = () => {
+      if (gen !== this.generation) return;
+      // Give the engine a moment to prove it emits boundaries; if it
+      // doesn't, fall back rather than freezing the highlight.
+      setTimeout(() => {
+        if (gen !== this.generation || sawBoundary) return;
+        this.onTimingMode?.("estimated");
+        this._startEstimator(chunk);
+      }, 700);
+    };
+
+    u.onend = () => {
+      if (gen !== this.generation) return;   // guards cancel()-triggered onend
+      this._stopEstimator();
+      this.cursor++;
+      this._speakCurrent();
+    };
+
+    u.onerror = (e) => {
+      if (gen !== this.generation) return;
+      if (e.error === "interrupted" || e.error === "canceled") return;
+      this._stopEstimator();
+      this.cursor++;
+      this._speakCurrent();
+    };
+
+    this.current = u;
+    this.synth.speak(u);
+  }
+
+  /* Fallback: walk the chunk's words at an estimated speaking rate.
+     Roughly 2.9 words/sec at rate 1.0 for English synthetic speech. */
+  _startEstimator(chunk) {
+    const gen = this.generation;
+    const tokens = this.tokensByChunk[this.cursor] || [];
+    if (!tokens.length) return;
+
+    const wps = 2.9 * this.rate;
+    this._estimateStart = performance.now();
+
+    const step = () => {
+      if (gen !== this.generation || this.state !== "playing") return;
+      const elapsed = (performance.now() - this._estimateStart) / 1000;
+      const i = Math.min(tokens.length - 1, Math.floor(elapsed * wps));
+      this.onWord(tokens[i].start);
+      this._raf = requestAnimationFrame(step);
+    };
+    this._raf = requestAnimationFrame(step);
+  }
+
+  _stopEstimator() {
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+  }
+
+  pause() {
+    if (this.state !== "playing") return;
+    this.synth.pause();
+    this._pausedAt = performance.now();
+    this._stopEstimator();
+    this._setState("paused");
+  }
+
+  resume() {
+    if (this.state !== "paused") return;
+    // Shift the estimator's origin so paused time isn't counted as spoken.
+    if (this._estimateStart) this._estimateStart += performance.now() - this._pausedAt;
+    this.synth.resume();
+    this._setState("playing");
+    if (this._estimateStart && !this._raf) {
+      this._startEstimatorResume();
+    }
+  }
+
+  _startEstimatorResume() {
+    const gen = this.generation;
+    const tokens = this.tokensByChunk[this.cursor] || [];
+    if (!tokens.length) return;
+    const wps = 2.9 * this.rate;
+    const step = () => {
+      if (gen !== this.generation || this.state !== "playing") return;
+      const elapsed = (performance.now() - this._estimateStart) / 1000;
+      const i = Math.min(tokens.length - 1, Math.floor(elapsed * wps));
+      this.onWord(tokens[i].start);
+      this._raf = requestAnimationFrame(step);
+    };
+    this._raf = requestAnimationFrame(step);
+  }
+
+  stop() {
+    this.generation++;              // invalidate every in-flight handler
+    this._stopEstimator();
+    this._estimateStart = 0;
+    try { this.synth.cancel(); } catch (_) {}
+    this._setState("idle");
+  }
+
+  setRate(rate) {
+    this.rate = rate;
+    // Web Speech ignores rate changes mid-utterance, so restart from the
+    // current chunk to make the change take effect immediately.
+    if (this.state === "playing") {
+      const resumeAt = this.cursor;
+      this.speak(this.chunks, { startIndex: resumeAt, tokensByChunk: this.tokensByChunk });
+    }
+  }
+
+  _setState(s) {
+    this.state = s;
+    this.onStateChange?.(s);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. APP
+ * ------------------------------------------------------------------ */
+
+const SAMPLE = `The trouble with reading on a screen is that the eye wanders.
+
+A word-synchronised reader solves a narrow but real problem: it gives the eye somewhere to be. As the voice moves through the sentence, the highlight moves with it, and the two together hold attention better than either alone.
+
+Click any word to jump there. Press space to play or pause. Drag the rate slider to change speed — the reader restarts the current sentence, because speech engines will not change rate in the middle of an utterance.
+
+Underneath, the design is deliberately boring. Text is tokenised once, with every word's exact character offset recorded. The speech engine reports its position as a character index; a binary search turns that index back into a word. Everything else — the chunking, the fallbacks, the scrolling — exists to keep those two numbers agreeing with each other.`;
+
+const el = {
+  reader: document.getElementById("reader"),
+  editor: document.getElementById("editor"),
+  play: document.getElementById("btnPlay"),
+  stop: document.getElementById("btnStop"),
+  edit: document.getElementById("btnEdit"),
+  voice: document.getElementById("voice"),
+  rate: document.getElementById("rate"),
+  rateVal: document.getElementById("rateVal"),
+  autoscroll: document.getElementById("autoscroll"),
+  wordCount: document.getElementById("wordCount"),
+  progressFill: document.getElementById("progressFill"),
+  timingMode: document.getElementById("timingMode"),
+  unsupported: document.getElementById("unsupported"),
+};
+
+const app = {
+  text: "",
+  tokens: [],
+  chunks: [],
+  tokensByChunk: [],
+  renderer: new Renderer(el.reader),
+  engine: null,
+
+  load(text) {
+    this.text = text;
+    this.tokens = tokenize(text);
+    this.chunks = chunkText(text);
+    this.tokensByChunk = this.chunks.map(c => {
+      const lo = c.charOffset, hi = c.charOffset + c.text.length;
+      return this.tokens.filter(t => t.start >= lo && t.start < hi);
+    });
+    this.renderer.render(text, this.tokens);
+    el.wordCount.textContent =
+      `${this.tokens.length.toLocaleString()} words · ${this.chunks.length} chunks`;
+    el.progressFill.style.width = "0%";
+  },
+
+  onWord(absChar) {
+    const i = tokenAtChar(this.tokens, absChar);
+    if (i < 0) return;
+    this.renderer.highlight(i, { scroll: el.autoscroll.checked });
+    el.progressFill.style.width = `${((i + 1) / this.tokens.length) * 100}%`;
+  },
+
+  /** Restart playback from an arbitrary word, slicing mid-chunk if needed. */
+  seekToToken(tokenIndex) {
+    const tok = this.tokens[tokenIndex];
+    if (!tok) return;
+
+    let ci = this.chunks.findIndex(
+      c => tok.start >= c.charOffset && tok.start < c.charOffset + c.text.length
+    );
+    if (ci < 0) ci = 0;
+
+    const chunk = this.chunks[ci];
+    const localOffset = tok.start - chunk.charOffset;
+
+    // Rebuild the queue with a trimmed first chunk so speech begins on the
+    // clicked word rather than the start of its sentence.
+    const trimmed = [
+      { text: chunk.text.slice(localOffset), charOffset: tok.start },
+      ...this.chunks.slice(ci + 1),
+    ];
+    const trimmedTokens = [
+      this.tokens.filter(t => t.start >= tok.start && t.start < chunk.charOffset + chunk.text.length),
+      ...this.tokensByChunk.slice(ci + 1),
+    ];
+
+    this.renderer.highlight(tokenIndex, { scroll: false });
+    this.engine.speak(trimmed, { startIndex: 0, tokensByChunk: trimmedTokens });
+  },
+};
+
+/* ---- wiring ---- */
+
+function setPlayLabel(state) {
+  el.play.textContent = state === "playing" ? "Pause" : (state === "paused" ? "Resume" : "Play");
+  el.timingMode.textContent = state === "idle" ? "idle" : el.timingMode.dataset.mode || "…";
+}
+
+if (!WebSpeechEngine.available) {
+  el.unsupported.classList.remove("hidden");
+  el.play.disabled = true;
+  el.stop.disabled = true;
+} else {
+  app.engine = new WebSpeechEngine({
+    onWord: (c) => app.onWord(c),
+    onStateChange: setPlayLabel,
+    onTimingMode: (mode) => {
+      el.timingMode.dataset.mode = mode === "native" ? "word timing: native" : "word timing: estimated";
+      el.timingMode.textContent = el.timingMode.dataset.mode;
+      el.timingMode.classList.toggle("warn", mode === "estimated");
+    },
+    onDone: () => {
+      el.progressFill.style.width = "100%";
+      el.timingMode.textContent = "done";
+    },
+  });
+
+  // Voices populate asynchronously — the first getVoices() call returns [].
+  function loadVoices() {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    el.voice.replaceChildren(
+      ...voices.map((v, i) => {
+        const o = document.createElement("option");
+        o.value = i;
+        o.textContent = `${v.name}${v.localService ? "" : " (network)"}`;
+        return o;
+      })
+    );
+    const preferred = voices.findIndex(v => v.localService && /^en/i.test(v.lang));
+    el.voice.value = preferred >= 0 ? preferred : 0;
+    app.engine.voice = voices[el.voice.value];
+  }
+  loadVoices();
+  speechSynthesis.addEventListener("voiceschanged", loadVoices);
+
+  el.voice.addEventListener("change", () => {
+    app.engine.voice = speechSynthesis.getVoices()[el.voice.value];
+  });
+
+  el.play.addEventListener("click", () => {
+    const s = app.engine.state;
+    if (s === "playing") app.engine.pause();
+    else if (s === "paused") app.engine.resume();
+    else app.engine.speak(app.chunks, { startIndex: 0, tokensByChunk: app.tokensByChunk });
+  });
+
+  el.stop.addEventListener("click", () => {
+    app.engine.stop();
+    app.renderer.clear();
+    el.progressFill.style.width = "0%";
+    el.timingMode.textContent = "idle";
+    el.timingMode.classList.remove("warn");
+  });
+
+  el.rate.addEventListener("input", () => {
+    const r = parseFloat(el.rate.value);
+    el.rateVal.textContent = r.toFixed(2) + "×";
+    app.engine.setRate(r);
+  });
+
+  el.reader.addEventListener("click", (e) => {
+    const span = e.target.closest(".w");
+    if (span) app.seekToToken(parseInt(span.dataset.i, 10));
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && document.activeElement !== el.editor) {
+      e.preventDefault();
+      el.play.click();
+    }
+  });
+}
+
+el.edit.addEventListener("click", () => {
+  const editing = !el.editor.classList.contains("hidden");
+  if (editing) {
+    app.engine?.stop();
+    app.load(el.editor.value);
+    el.editor.classList.add("hidden");
+    el.reader.classList.remove("hidden");
+    el.edit.textContent = "Edit text";
+  } else {
+    el.editor.value = app.text;
+    el.editor.classList.remove("hidden");
+    el.reader.classList.add("hidden");
+    el.edit.textContent = "Done";
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * 6. IMPORTERS
+ *
+ * Every importer is a text producer: whatever the source, it resolves to
+ * a plain string and hands it to app.load(). The tokenizer and engine
+ * never learn where the text came from, which is what keeps adding
+ * formats cheap — a PDF or EPUB importer slots in here and nothing
+ * downstream changes.
+ * ------------------------------------------------------------------ */
+
+const TEXT_EXT = /\.(txt|md|markdown|text)$/i;
+
+/** Strip Markdown syntax that would otherwise be read aloud literally.
+ *  Without this, "## Heading" is spoken as "hash hash Heading". */
+function stripMarkdown(src) {
+  return src
+    .replace(/```[\s\S]*?```/g, "")             // fenced code blocks
+    .replace(/`([^`]+)`/g, "$1")                 // inline code
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")    // images -> alt text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")     // links -> link text
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")          // headings
+    .replace(/^\s{0,3}>\s?/gm, "")               // blockquotes
+    .replace(/^\s*[-*+]\s+/gm, "")               // bullets
+    .replace(/^\s*\d+\.\s+/gm, "")               // numbered lists
+    .replace(/^\s*[-*_]{3,}\s*$/gm, "")          // horizontal rules
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")          // bold
+    .replace(/(\*|_)(.*?)\1/g, "$2")             // italic
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function toast(msg, ms = 2600) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("on");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("on"), ms);
+}
+
+function setSource(label) {
+  document.getElementById("source").textContent = label;
+}
+
+async function importFile(file) {
+  if (!TEXT_EXT.test(file.name) && !file.type.startsWith("text/")) {
+    toast(`Can't read ${file.name} — plain text and Markdown only for now.`);
+    return;
+  }
+  try {
+    const raw = await file.text();
+    const text = /\.(md|markdown)$/i.test(file.name) ? stripMarkdown(raw) : raw;
+    if (!text.trim()) { toast("That file is empty."); return; }
+    app.engine?.stop();
+    app.renderer.clear();
+    app.load(text);
+    setSource(file.name);
+    toast(`Loaded ${file.name}`);
+  } catch (err) {
+    toast(`Couldn't read that file: ${err.message}`);
+  }
+}
+
+/* --- file picker --- */
+const fileInput = document.getElementById("fileInput");
+document.getElementById("btnOpen").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+  if (fileInput.files[0]) importFile(fileInput.files[0]);
+  fileInput.value = "";   // allow re-picking the same file
+});
+
+/* --- clipboard --- */
+document.getElementById("btnPaste").addEventListener("click", async () => {
+  if (!navigator.clipboard?.readText) {
+    toast("Clipboard access unavailable — use Edit text instead.");
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text.trim()) { toast("Clipboard is empty."); return; }
+    app.engine?.stop();
+    app.renderer.clear();
+    app.load(text);
+    setSource("pasted text");
+    toast(`Loaded ${text.length.toLocaleString()} characters`);
+  } catch (_) {
+    // Firefox and Safari deny readText without a user permission grant.
+    toast("Browser blocked clipboard read — use Edit text instead.");
+  }
+});
+
+/* --- drag and drop --- */
+const dropEl = document.getElementById("drop");
+let dragDepth = 0;   // counter, because dragenter/leave fire per child element
+
+window.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer?.types.includes("Files")) return;
+  dragDepth++;
+  dropEl.classList.add("on");
+});
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; dropEl.classList.remove("on"); }
+});
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  dropEl.classList.remove("on");
+  const file = e.dataTransfer?.files?.[0];
+  if (file) importFile(file);
+});
+
+app.load(SAMPLE);
+</script>
