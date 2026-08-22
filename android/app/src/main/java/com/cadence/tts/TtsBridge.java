@@ -31,7 +31,12 @@ import java.util.Set;
 public class TtsBridge {
 
     private final WebView web;
-    private final TextToSpeech tts;
+    // Not final: the init callback below reads this field from inside the
+    // same expression that assigns it. The callback only ever fires
+    // asynchronously after the constructor returns, so tts is always set by
+    // then, but javac's definite-assignment check for blank finals can't see
+    // that and refuses to compile it as final.
+    private TextToSpeech tts;
     private volatile boolean ready = false;
 
     public TtsBridge(WebView web, Context context) {

@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence TTS — word-synced reader</title>
 <style>
   :root {
@@ -68,16 +68,29 @@
 
   /* ---------------------------- top bar ---------------------------- */
 
+  /* Android 15+ draws apps edge to edge, so content lands underneath the
+     status bar, the punch-hole camera and the gesture bar unless it is
+     inset deliberately. The native shell overwrites these at runtime with
+     the real measurements; env() covers the browser and PWA cases. */
+  :root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+  }
+
   .topbar {
     position: sticky; top: 0; z-index: 20;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
+    gap: 10px;
+    padding: 10px calc(16px + var(--safe-right)) 10px calc(16px + var(--safe-left));
+    padding-top: calc(10px + var(--safe-top));
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
+  .tb-mid { min-width: 0; text-align: center; }
   /* min-width: 0 is required. Grid items default to min-width: auto, so the
      voice select refuses to shrink below the width of its longest option
      name and pushes the whole page into horizontal scroll. */
@@ -107,6 +120,9 @@
   .ic:focus-visible, .play-btn:focus-visible, .speed:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
+
+  #tools { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  #btnMore { display: none; }
 
   select#voice {
     font: inherit; font-size: 12px;
@@ -241,7 +257,7 @@
 
   .player {
     position: fixed; z-index: 30;
-    left: 50%; bottom: 26px; transform: translateX(-50%);
+    left: 50%; bottom: calc(26px + var(--safe-bottom)); transform: translateX(-50%);
     width: min(520px, calc(100vw - 32px));
     background: var(--paper);
     border-radius: 18px;
@@ -363,6 +379,38 @@
   /* On a phone the sheet metaphor just wastes the width the text needs, so
      the panel goes full-bleed: no gutters, no radius, no shadow, and tall
      enough to cover the screen even when the document is short. */
+  /* Eight controls never fit across a phone, so below this width the
+     secondary ones collapse into a sheet behind the overflow button and
+     pick up text labels, which a 34px icon cannot carry on its own. */
+  @media (max-width: 720px) {
+    #btnMore { display: inline-flex; }
+
+    #tools {
+      display: none;
+      position: fixed;
+      top: calc(var(--safe-top) + 54px);
+      right: calc(10px + var(--safe-right));
+      flex-direction: column; align-items: stretch; gap: 2px;
+      min-width: 208px; padding: 6px;
+      background: var(--paper);
+      border: 1px solid var(--line); border-radius: 14px;
+      box-shadow: var(--shadow-lg);
+      z-index: 40;
+    }
+    #tools.open { display: flex; }
+    #tools .ic {
+      width: 100%; height: 42px;
+      justify-content: flex-start; gap: 11px; padding: 0 11px;
+      border-radius: 9px;
+    }
+    #tools .ic::after {
+      content: attr(data-label);
+      font-size: 13.5px; font-weight: 500; color: var(--text);
+    }
+    #tools .ic[aria-pressed="true"]::after { color: var(--accent); }
+    #tools select#voice { width: 100%; max-width: none; height: 40px; margin-top: 2px; }
+  }
+
   @media (max-width: 640px) {
     main { padding: 0 0 190px; }
     .paper {
@@ -385,35 +433,45 @@
 
 <header class="topbar">
   <div class="tb-left">
-    <button class="ic" id="btnOpen" title="Open a file" aria-label="Open a file">
+    <button class="ic" id="btnOpen" data-label="Open file" title="Open a file" aria-label="Open a file">
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z"/></svg>
-    </button>
-    <button class="ic" id="btnPaste" title="Paste from clipboard" aria-label="Paste from clipboard">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2"/><path d="M10 4V3h4v1"/></svg>
-    </button>
-    <button class="ic" id="btnEdit" title="Edit text" aria-label="Edit text">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/></svg>
-    </button>
-    <button class="ic" id="btnStop" title="Stop" aria-label="Stop">
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
     </button>
     <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,.pdf,text/plain,application/pdf">
   </div>
 
-  <div>
+  <div class="tb-mid">
     <div class="tb-title" id="source">Cadence TTS</div>
-    <div class="tb-title tb-sub" id="wordCount">&nbsp;</div>
+    <div class="tb-sub" id="wordCount">&nbsp;</div>
   </div>
 
   <div class="tb-right">
-    <button class="ic" id="btnFont" title="Text size" aria-label="Text size">Aa</button>
-    <button class="ic" id="btnClean" title="Clean markup: strip Markdown symbols" aria-label="Clean markup" aria-pressed="true">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 12h9M5 17h6"/><path d="m15.5 16.5 2 2 4-4.5"/></svg>
+    <!-- One container, two layouts: an inline row on a wide screen, a
+         popover sheet behind the overflow button on a narrow one. Same
+         elements either way, so no control is duplicated. -->
+    <div id="tools">
+      <button class="ic" id="btnPaste" data-label="Paste" title="Paste from clipboard" aria-label="Paste from clipboard">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2"/><path d="M10 4V3h4v1"/></svg>
+      </button>
+      <button class="ic" id="btnEdit" data-label="Edit text" title="Edit text" aria-label="Edit text">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/></svg>
+      </button>
+      <button class="ic" id="btnStop" data-label="Stop" title="Stop" aria-label="Stop">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
+      </button>
+      <button class="ic" id="btnFont" data-label="Text size" title="Text size" aria-label="Text size">Aa</button>
+      <button class="ic" id="btnClean" data-label="Render formatting" title="Render Markdown formatting" aria-label="Render formatting" aria-pressed="true">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 12h9M5 17h6"/><path d="m15.5 16.5 2 2 4-4.5"/></svg>
+      </button>
+      <button class="ic" id="btnFollow" data-label="Follow along" title="Follow the spoken word" aria-label="Follow the spoken word" aria-pressed="true">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
+      </button>
+      <select id="voice" title="Voice" aria-label="Voice"></select>
+    </div>
+
+    <button class="ic" id="btnMore" title="More controls" aria-label="More controls" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
     </button>
-    <button class="ic" id="btnFollow" title="Follow the spoken word" aria-label="Follow the spoken word" aria-pressed="true">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
-    </button>
-    <select id="voice" title="Voice"></select>
+
     <input type="checkbox" id="clean" class="hidden" checked>
     <input type="checkbox" id="autoscroll" class="hidden" checked>
     <input type="range" id="rate" class="hidden" min="0.5" max="5" step="any" value="1">
@@ -2077,6 +2135,32 @@ function bindToggle(button, input, { announce } = {}) {
 bindToggle(el.btnClean, el.clean);   // its own change handler already toasts
 bindToggle(el.btnFollow, el.autoscroll, {
   announce: (on) => (on ? "Following the spoken word" : "Follow off"),
+});
+
+/* --- overflow sheet (phones) --- */
+const tools = document.getElementById("tools");
+const btnMore = document.getElementById("btnMore");
+
+function closeTools() {
+  tools.classList.remove("open");
+  btnMore.setAttribute("aria-expanded", "false");
+}
+
+btnMore.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = tools.classList.toggle("open");
+  btnMore.setAttribute("aria-expanded", String(open));
+});
+
+// Any action inside the sheet closes it, so the reader is not left covered.
+tools.addEventListener("click", (e) => {
+  if (e.target.closest("button")) closeTools();
+});
+document.addEventListener("click", (e) => {
+  if (tools.classList.contains("open") && !tools.contains(e.target)) closeTools();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTools();
 });
 
 /* --- text size --- */

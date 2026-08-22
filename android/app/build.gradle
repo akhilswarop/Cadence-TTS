@@ -29,6 +29,14 @@ android {
     }
 }
 
+configurations.all {
+    // kotlin-stdlib 1.8+ folded in what kotlin-stdlib-jdk7/jdk8 used to provide
+    // separately; a transitive dependency still pulling the old split
+    // artifacts collides with appcompat's newer merged one.
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+}
+
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
 }
