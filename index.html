@@ -1,39 +1,56 @@
-<title>Cadence — TTS Reader</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cadence TTS — word-synced reader</title>
 <style>
   :root {
-    --bg: #fbfaf8;
-    --surface: #ffffff;
-    --border: #e3ded6;
-    --text: #22201d;
-    --muted: #6f6963;
-    --accent: #b8552b;
-    --accent-soft: #fbe9df;
-    --spoken: #a8a29a;
-    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.04);
+    --bg: #eef0f6;
+    --paper: #ffffff;
+    --line: #e2e5ee;
+    --text: #191b22;
+    --muted: #838a9c;
+    --accent: #2f4bf0;
+    --accent-ink: #ffffff;
+    --sentence: #e8e6fd;
+    --word: #c3bcf9;
+    --word-ink: #1a1440;
+    --spoken: #9aa0b0;
+    --chip: #f3f4f9;
+    --shadow-sm: 0 1px 2px rgba(20,25,50,.06);
+    --shadow-lg: 0 4px 12px rgba(20,25,50,.08), 0 16px 40px rgba(20,25,50,.10);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #171614;
-      --surface: #1f1e1b;
-      --border: #34322d;
-      --text: #eae7e1;
-      --muted: #9a938a;
-      --accent: #e8834f;
-      --accent-soft: #3a2419;
-      --spoken: #625c54;
-      --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.2);
+      --bg: #101218;
+      --paper: #181b23;
+      --line: #262a35;
+      --text: #e9ebf2;
+      --muted: #838a9c;
+      --accent: #6b83ff;
+      --accent-ink: #0b0d14;
+      --sentence: #262a4d;
+      --word: #4a44a8;
+      --word-ink: #f2f0ff;
+      --spoken: #5d6475;
+      --chip: #1f2430;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.35);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #171614;
-    --surface: #1f1e1b;
-    --border: #34322d;
-    --text: #eae7e1;
-    --muted: #9a938a;
-    --accent: #e8834f;
-    --accent-soft: #3a2419;
-    --spoken: #625c54;
-    --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.2);
+    --bg: #101218;
+    --paper: #181b23;
+    --line: #262a35;
+    --text: #e9ebf2;
+    --muted: #838a9c;
+    --accent: #6b83ff;
+    --accent-ink: #0b0d14;
+    --sentence: #262a4d;
+    --word: #4a44a8;
+    --word-ink: #f2f0ff;
+    --spoken: #5d6475;
+    --chip: #1f2430;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.35);
   }
 
   * { box-sizing: border-box; }
@@ -44,160 +61,283 @@
     color: var(--text);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
 
-  header {
-    position: sticky; top: 0; z-index: 10;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
+  .hidden { display: none !important; }
+
+  /* ---------------------------- top bar ---------------------------- */
+
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .tb-left, .tb-right { display: flex; align-items: center; gap: 4px; }
+  .tb-right { justify-content: flex-end; }
+
+  .tb-title {
+    font-size: 14px; font-weight: 600; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 46vw; text-align: center;
+  }
+  .tb-sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .ic {
+    appearance: none; border: 0; background: transparent;
+    color: var(--muted); cursor: pointer;
+    width: 34px; height: 34px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: inherit; font-size: 13px; font-weight: 600;
+    transition: background .12s, color .12s;
+  }
+  .ic:hover { background: var(--chip); color: var(--text); }
+  .ic[aria-pressed="true"] { color: var(--accent); background: var(--chip); }
+  .ic svg { display: block; }
+  .ic:focus-visible, .play-btn:focus-visible, .speed:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
   }
 
-  .bar {
-    max-width: 820px; margin: 0 auto;
-    padding: 12px 20px;
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  select#voice {
+    font: inherit; font-size: 12px;
+    color: var(--muted); background: var(--chip);
+    border: 1px solid transparent; border-radius: 9px;
+    padding: 6px 8px; max-width: 168px; cursor: pointer;
   }
+  select#voice:hover { color: var(--text); }
 
-  .brand {
-    font-weight: 600; font-size: 15px; letter-spacing: -.01em;
-    margin-right: auto; display: flex; align-items: center; gap: 8px;
-  }
-  .brand small { color: var(--muted); font-weight: 400; font-size: 12px; }
+  /* ----------------------------- paper ----------------------------- */
 
-  button {
-    font: inherit; font-size: 13px;
-    padding: 7px 13px;
-    border-radius: 7px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-    transition: background .12s, border-color .12s;
-  }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .4; cursor: default; }
-  button.primary {
-    background: var(--accent); border-color: var(--accent);
-    color: #fff; font-weight: 500; min-width: 86px;
-  }
-  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  main { padding: 26px 16px 190px; }
 
-  select, input[type=range] { font: inherit; font-size: 13px; }
-  select {
-    padding: 6px 8px; border-radius: 7px;
-    border: 1px solid var(--border);
-    background: var(--surface); color: var(--text);
-    max-width: 190px;
+  .paper {
+    max-width: 720px; margin: 0 auto;
+    background: var(--paper);
+    border-radius: 14px;
+    box-shadow: var(--shadow-sm);
+    padding: 52px 60px 64px;
   }
-  label.ctl {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--muted); white-space: nowrap;
-  }
-  input[type=range] { width: 92px; accent-color: var(--accent); }
-
-  main { max-width: 820px; margin: 0 auto; padding: 32px 20px 45vh; }
 
   #reader {
-    font-family: ui-serif, Georgia, "Times New Roman", serif;
-    font-size: 20px;
-    line-height: 1.85;
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: var(--reader-size, 20px);
+    line-height: 1.95;
     white-space: pre-wrap;
     word-wrap: break-word;
   }
 
-  .w {
-    border-radius: 4px;
-    padding: 1px 0;
-    transition: color .1s;
-    cursor: pointer;
+  /* Two highlight levels: a soft band marking the sentence being spoken,
+     and a saturated mark on the exact word. The band gives the eye a place
+     to land when it looks away and back; the word carries the position. */
+  .w { cursor: pointer; padding: 2px 0; border-radius: 3px; }
+
+  /* Words are separate spans, so a plain background leaves the spaces
+     between them unpainted and the band comes out striped. The shoulders
+     below bleed each word's colour into the gap on either side, which
+     costs no layout because box-shadow doesn't reflow. */
+  .w.sentence {
+    background: var(--sentence);
+    box-shadow: -0.3em 0 0 var(--sentence), 0.3em 0 0 var(--sentence);
   }
-  .w:hover { text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
-  .w.spoken { color: var(--spoken); }
+  /* Already-spoken words deliberately keep full contrast — dimming them
+     makes a long document look washed out as you read. The class is still
+     applied, so restoring a progress tint is a one-line change:
+       .w.spoken:not(.sentence) { color: var(--spoken); }  */
   .w.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-    font-weight: 600;
+    background: var(--word);
+    color: var(--word-ink);
+    border-radius: 4px;
+    box-shadow: -0.16em 0 0 var(--word), 0.16em 0 0 var(--word);
   }
+  .w:hover:not(.active) { box-shadow: 0 0 0 2px var(--chip); background: var(--chip); }
 
   #editor {
-    width: 100%; min-height: 320px;
-    padding: 16px;
+    display: block; width: 100%; min-height: 340px;
+    max-width: 720px; margin: 0 auto;
+    padding: 20px;
     font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-    font-size: 13px; line-height: 1.6;
-    border: 1px solid var(--border); border-radius: 10px;
-    background: var(--surface); color: var(--text);
-    resize: vertical;
-    box-shadow: var(--shadow);
+    font-size: 13px; line-height: 1.7;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: var(--paper); color: var(--text);
+    resize: vertical; box-shadow: var(--shadow-sm);
   }
-  .hidden { display: none !important; }
 
-  footer {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    border-top: 1px solid var(--border);
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
-    backdrop-filter: blur(12px);
-    font-size: 12px; color: var(--muted);
+  .banner {
+    max-width: 720px; margin: 0 auto 18px;
+    padding: 12px 16px; border-radius: 10px;
+    background: var(--sentence); color: var(--text);
+    font-size: 13px;
   }
-  .status {
-    max-width: 820px; margin: 0 auto; padding: 9px 20px;
-    display: flex; gap: 16px; align-items: center;
+
+  /* ---------------------------- player ----------------------------- */
+
+  .player {
+    position: fixed; z-index: 30;
+    left: 50%; bottom: 26px; transform: translateX(-50%);
+    width: min(520px, calc(100vw - 32px));
+    background: var(--paper);
+    border-radius: 18px;
+    box-shadow: var(--shadow-lg);
+    padding: 14px 18px 16px;
   }
-  #progress {
-    flex: 1; height: 3px; border-radius: 2px;
-    background: var(--border); overflow: hidden;
+
+  .p-bar {
+    height: 4px; border-radius: 3px;
+    background: var(--line); overflow: hidden; cursor: pointer;
   }
-  #progressFill { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  #progressFill {
+    height: 100%; width: 0%;
+    background: var(--accent); border-radius: 3px;
+    transition: width .18s linear;
+  }
+  .p-times {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--muted);
+    margin-top: 7px; font-variant-numeric: tabular-nums;
+  }
+
+  /* The transport is centred on its own. The dial is taken out of flow so
+     its width can never pull the play button off centre. */
+  .p-controls {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    gap: 20px; margin-top: 10px; min-height: 54px;
+  }
+
+  .play-btn {
+    appearance: none; border: 0; cursor: pointer;
+    width: 54px; height: 54px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-ink);
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 38%, transparent);
+    transition: transform .1s, filter .12s;
+  }
+  .play-btn:hover { filter: brightness(1.07); }
+  .play-btn:active { transform: scale(.94); }
+  .play-btn svg { display: block; }
+
+  /* Speed dial: a 270-degree gauge with the value in the middle. */
+  .dial {
+    position: absolute; right: 2px; top: 50%;
+    transform: translateY(-50%);
+    width: 42px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: ns-resize; user-select: none; touch-action: none;
+    border-radius: 50%;
+  }
+  .dial svg { position: absolute; inset: 0; transform: rotate(135deg); }
+  .dial-track {
+    fill: none; stroke: var(--line); stroke-width: 3.5; stroke-linecap: round;
+  }
+  .dial-arc {
+    fill: none; stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round;
+    transition: stroke-dasharray .12s ease;
+  }
+  .dial:hover .dial-track { stroke: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+  .dial:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  #rateVal {
+    position: relative;
+    font-size: 10.5px; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums; line-height: 1;
+    pointer-events: none;
+  }
+
+  /* Only surfaces when word timing is estimated rather than reported by
+     the speech engine — an idle badge saying "idle" is just clutter. */
+  #timingMode {
+    position: absolute; top: 11px; right: 14px;
+    padding: 2px 7px; border-radius: 20px;
+    background: var(--sentence); color: var(--accent);
+    font-size: 9.5px; font-weight: 700; letter-spacing: .02em;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #timingMode.show { opacity: 1; }
+
+  .p-foot {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; margin-top: 10px;
+    font-size: 10.5px; color: var(--muted);
+  }
   .pill {
     padding: 2px 8px; border-radius: 20px;
-    border: 1px solid var(--border); white-space: nowrap;
+    border: 1px solid var(--line); white-space: nowrap;
   }
   .pill.warn { border-color: var(--accent); color: var(--accent); }
-  .banner {
-    max-width: 820px; margin: 0 auto 20px;
-    padding: 12px 16px; border-radius: 8px;
-    background: var(--accent-soft); color: var(--accent);
-    font-size: 13px; border: 1px solid var(--accent);
-  }
+
+  /* --------------------------- overlays ---------------------------- */
 
   #drop {
     position: fixed; inset: 0; z-index: 100;
-    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
     backdrop-filter: blur(6px);
     display: flex; align-items: center; justify-content: center;
     pointer-events: none; opacity: 0; transition: opacity .15s;
   }
   #drop.on { opacity: 1; }
   #drop div {
-    padding: 40px 56px; border-radius: 14px;
+    padding: 38px 54px; border-radius: 16px;
     border: 2px dashed var(--accent); color: var(--accent);
-    background: var(--surface); font-size: 15px; font-weight: 500;
-    box-shadow: var(--shadow);
+    background: var(--paper); font-size: 15px; font-weight: 600;
+    box-shadow: var(--shadow-lg);
   }
 
   #toast {
-    position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%);
-    padding: 10px 16px; border-radius: 8px;
-    background: var(--surface); border: 1px solid var(--border);
-    color: var(--text); font-size: 13px; box-shadow: var(--shadow);
-    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 200;
+    position: fixed; z-index: 200;
+    bottom: 150px; left: 50%; transform: translateX(-50%);
+    padding: 9px 15px; border-radius: 10px;
+    background: var(--text); color: var(--bg);
+    font-size: 12.5px; font-weight: 500;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    box-shadow: var(--shadow-lg);
   }
   #toast.on { opacity: 1; }
+
+  @media (max-width: 640px) {
+    .paper { padding: 32px 24px 44px; border-radius: 12px; }
+    .tb-title { max-width: 38vw; }
+    main { padding-bottom: 200px; }
+  }
 </style>
 
-<header>
-  <div class="bar">
-    <div class="brand">Cadence <small id="source">word-synced reader</small></div>
-    <button id="btnOpen">Open file</button>
-    <button id="btnPaste">Paste</button>
-    <button id="btnEdit">Edit text</button>
-    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,text/plain">
+<header class="topbar">
+  <div class="tb-left">
+    <button class="ic" id="btnOpen" title="Open a file" aria-label="Open a file">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z"/></svg>
+    </button>
+    <button class="ic" id="btnPaste" title="Paste from clipboard" aria-label="Paste from clipboard">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2"/><path d="M10 4V3h4v1"/></svg>
+    </button>
+    <button class="ic" id="btnEdit" title="Edit text" aria-label="Edit text">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/></svg>
+    </button>
+    <button class="ic" id="btnStop" title="Stop" aria-label="Stop">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
+    </button>
+    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,.pdf,text/plain,application/pdf">
+  </div>
+
+  <div>
+    <div class="tb-title" id="source">Cadence TTS</div>
+    <div class="tb-title tb-sub" id="wordCount">&nbsp;</div>
+  </div>
+
+  <div class="tb-right">
+    <button class="ic" id="btnFont" title="Text size" aria-label="Text size">Aa</button>
+    <button class="ic" id="btnClean" title="Clean markup: strip Markdown symbols" aria-label="Clean markup" aria-pressed="true">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 12h9M5 17h6"/><path d="m15.5 16.5 2 2 4-4.5"/></svg>
+    </button>
+    <button class="ic" id="btnFollow" title="Follow the spoken word" aria-label="Follow the spoken word" aria-pressed="true">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
+    </button>
     <select id="voice" title="Voice"></select>
-    <label class="ctl">Rate <input type="range" id="rate" min="0.5" max="5" step="0.1" value="1"><span id="rateVal">1.00×</span></label>
-    <label class="ctl"><input type="checkbox" id="autoscroll" checked> Follow</label>
-    <button id="btnStop">Stop</button>
-    <button id="btnPlay" class="primary">Play</button>
+    <input type="checkbox" id="clean" class="hidden" checked>
+    <input type="checkbox" id="autoscroll" class="hidden" checked>
+    <input type="range" id="rate" class="hidden" min="0.5" max="5" step="any" value="1">
   </div>
 </header>
 
@@ -207,19 +347,45 @@
     Chrome, Edge, and Safari support it.
   </div>
   <textarea id="editor" class="hidden" spellcheck="false"></textarea>
-  <div id="reader"></div>
+  <article class="paper"><div id="reader"></div></article>
 </main>
 
-<div id="drop"><div>Drop a .txt or .md file to read it</div></div>
-<div id="toast"></div>
+<div class="player">
+  <div class="p-bar" id="seekBar" title="Jump to a position"><div id="progressFill"></div></div>
+  <div class="p-times"><span id="tElapsed">0:00</span><span id="tTotal">0:00</span></div>
 
-<footer>
-  <div class="status">
-    <span id="wordCount">—</span>
-    <div id="progress"><div id="progressFill"></div></div>
-    <span id="timingMode" class="pill">idle</span>
+  <div class="p-controls">
+    <button class="ic" id="btnBack" title="Back one sentence" aria-label="Back one sentence">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M11.5 12 18 7.4v9.2zM5 12l6.5-4.6v9.2z"/></svg>
+    </button>
+
+    <button class="play-btn" id="btnPlay" title="Play (Space)" aria-label="Play">
+      <svg id="iconPlay" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8.5 5.6v12.8a1 1 0 0 0 1.52.86l10.2-6.4a1 1 0 0 0 0-1.72L10.02 4.74A1 1 0 0 0 8.5 5.6z" fill="currentColor"/></svg>
+      <svg id="iconPause" class="hidden" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="7" y="5" width="4" height="14" rx="1.4" fill="currentColor"/><rect x="13" y="5" width="4" height="14" rx="1.4" fill="currentColor"/></svg>
+    </button>
+
+    <button class="ic" id="btnFwd" title="Forward one sentence" aria-label="Forward one sentence">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12.5 12 6 16.6V7.4zM19 12l-6.5 4.6V7.4z"/></svg>
+    </button>
+
+    <div class="dial" id="speedDial" role="slider" tabindex="0"
+         aria-label="Playback speed" aria-valuemin="0" aria-valuemax="9" aria-valuenow="1"
+         title="Speed &mdash; drag, scroll, or tap">
+      <svg viewBox="0 0 40 40" width="42" height="42" aria-hidden="true">
+        <circle class="dial-track" cx="20" cy="20" r="16"/>
+        <circle class="dial-arc" id="dialArc" cx="20" cy="20" r="16"/>
+      </svg>
+      <span id="rateVal">1&#215;</span>
+    </div>
+
+    <input type="range" id="speedSlider" class="hidden" min="0" max="9" step="1" value="1">
   </div>
-</footer>
+
+  <span id="timingMode">estimated timing</span>
+</div>
+
+<div id="drop"><div>Drop a .txt, .md, or .pdf file to read it</div></div>
+<div id="toast"></div>
 
 <script>
 "use strict";
@@ -314,6 +480,37 @@ function chunkText(text, maxLen = 220) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 2b. SENTENCES
+ *
+ * Distinct from chunks. A chunk is a unit of speech, sized to keep the
+ * engine happy, and may hold several sentences. The highlight band is a
+ * reading aid, so it follows real sentence boundaries instead — otherwise
+ * it stretches across a paragraph break and stops meaning anything.
+ * ------------------------------------------------------------------ */
+
+function buildSentences(text, tokens) {
+  const bounds = [0];
+  const RE = /[.!?]+['")\]]*(?=\s|$)|\n{2,}/g;
+  let m;
+  while ((m = RE.exec(text)) !== null) bounds.push(m.index + m[0].length);
+  bounds.push(text.length);
+
+  const edges = [...new Set(bounds)].sort((a, b) => a - b);
+  const ofToken = new Int32Array(tokens.length);
+  const ranges = [];
+
+  let s = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    while (s < edges.length - 2 && tokens[i].start >= edges[s + 1]) s++;
+    ofToken[i] = s;
+    if (ranges[s]) ranges[s][1] = i;
+    else ranges[s] = [i, i];
+  }
+
+  return { ofToken, ranges };
+}
+
+/* ------------------------------------------------------------------ *
  * 3. RENDERER
  *
  * Word spans with the original inter-word text preserved verbatim, so
@@ -381,10 +578,27 @@ class Renderer {
     }
   }
 
+  /** Soft band over the sentence being spoken. Only the edges of the range
+   *  are touched when it moves, so this stays cheap on long documents. */
+  setSentence(from, to) {
+    if (this._sFrom === from && this._sTo === to) return;
+    if (this._sFrom != null) {
+      for (let i = this._sFrom; i <= this._sTo && i < this.spans.length; i++) {
+        this.spans[i].classList.remove("sentence");
+      }
+    }
+    for (let i = from; i <= to && i < this.spans.length; i++) {
+      this.spans[i].classList.add("sentence");
+    }
+    this._sFrom = from;
+    this._sTo = to;
+  }
+
   clear() {
     if (this.active >= 0) this.spans[this.active].classList.remove("active");
-    this.spans.forEach(s => s.classList.remove("spoken"));
+    this.spans.forEach(s => s.classList.remove("spoken", "sentence"));
     this.active = -1;
+    this._sFrom = this._sTo = null;
   }
 }
 
@@ -601,11 +815,43 @@ const el = {
   rate: document.getElementById("rate"),
   rateVal: document.getElementById("rateVal"),
   autoscroll: document.getElementById("autoscroll"),
+  clean: document.getElementById("clean"),
+  iconPlay: document.getElementById("iconPlay"),
+  iconPause: document.getElementById("iconPause"),
   wordCount: document.getElementById("wordCount"),
   progressFill: document.getElementById("progressFill"),
   timingMode: document.getElementById("timingMode"),
   unsupported: document.getElementById("unsupported"),
+  back: document.getElementById("btnBack"),
+  fwd: document.getElementById("btnFwd"),
+  speedSlider: document.getElementById("speedSlider"),
+  seekBar: document.getElementById("seekBar"),
+  tElapsed: document.getElementById("tElapsed"),
+  tTotal: document.getElementById("tTotal"),
+  btnFont: document.getElementById("btnFont"),
+  btnClean: document.getElementById("btnClean"),
+  btnFollow: document.getElementById("btnFollow"),
 };
+
+/* Synthetic speech runs near 2.9 words/sec at rate 1.0. The clock in the
+   player is an estimate from word position, not a measured audio duration —
+   Web Speech never tells us how long an utterance will actually take. */
+const WORDS_PER_SECOND = 2.9;
+
+function fmtTime(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function updateProgress(tokenIndex) {
+  const total = app.tokens.length || 1;
+  const done = Math.max(0, tokenIndex + 1);
+  el.progressFill.style.width = `${(done / total) * 100}%`;
+
+  const wps = WORDS_PER_SECOND * (app.engine ? app.engine.rate : 1);
+  el.tElapsed.textContent = fmtTime(done / wps);
+  el.tTotal.textContent = fmtTime(total / wps);
+}
 
 const app = {
   text: "",
@@ -623,17 +869,34 @@ const app = {
       const lo = c.charOffset, hi = c.charOffset + c.text.length;
       return this.tokens.filter(t => t.start >= lo && t.start < hi);
     });
+    // Reverse index so the chunk holding a word is known in O(1).
+    this.chunkOfToken = new Int32Array(this.tokens.length).fill(-1);
+    this.tokensByChunk.forEach((toks, ci) => {
+      for (const t of toks) this.chunkOfToken[t.index] = ci;
+    });
+
+    // Sentences are tracked separately from chunks — see buildSentences.
+    const sentences = buildSentences(text, this.tokens);
+    this.sentenceOfToken = sentences.ofToken;
+    this.sentenceRanges = sentences.ranges;
+
     this.renderer.render(text, this.tokens);
-    el.wordCount.textContent =
-      `${this.tokens.length.toLocaleString()} words · ${this.chunks.length} chunks`;
-    el.progressFill.style.width = "0%";
+    el.wordCount.textContent = `${this.tokens.length.toLocaleString()} words`;
+    updateProgress(-1);
   },
 
   onWord(absChar) {
     const i = tokenAtChar(this.tokens, absChar);
     if (i < 0) return;
+
     this.renderer.highlight(i, { scroll: el.autoscroll.checked });
-    el.progressFill.style.width = `${((i + 1) / this.tokens.length) * 100}%`;
+
+    const range = this.sentenceRanges
+      ? this.sentenceRanges[this.sentenceOfToken[i]]
+      : null;
+    if (range) this.renderer.setSentence(range[0], range[1]);
+
+    updateProgress(i);
   },
 
   /** Restart playback from an arbitrary word, slicing mid-chunk if needed. */
@@ -668,8 +931,22 @@ const app = {
 /* ---- wiring ---- */
 
 function setPlayLabel(state) {
-  el.play.textContent = state === "playing" ? "Pause" : (state === "paused" ? "Resume" : "Play");
-  el.timingMode.textContent = state === "idle" ? "idle" : el.timingMode.dataset.mode || "…";
+  const playing = state === "playing";
+  el.iconPlay.classList.toggle("hidden", playing);
+  el.iconPause.classList.toggle("hidden", !playing);
+
+  const label = playing ? "Pause" : state === "paused" ? "Resume" : "Play";
+  el.play.title = `${label} (Space)`;
+  el.play.setAttribute("aria-label", label);
+}
+
+/** Single entry point for play/pause/resume, shared by the button and Space. */
+function togglePlayback() {
+  if (!app.engine) return;
+  const s = app.engine.state;
+  if (s === "playing") app.engine.pause();
+  else if (s === "paused") app.engine.resume();
+  else app.engine.speak(app.chunks, { startIndex: 0, tokensByChunk: app.tokensByChunk });
 }
 
 if (!WebSpeechEngine.available) {
@@ -680,14 +957,14 @@ if (!WebSpeechEngine.available) {
   app.engine = new WebSpeechEngine({
     onWord: (c) => app.onWord(c),
     onStateChange: setPlayLabel,
+    // Surfaced only when the highlight is running on an estimate, because
+    // that is the case the reader deserves to know about.
     onTimingMode: (mode) => {
-      el.timingMode.dataset.mode = mode === "native" ? "word timing: native" : "word timing: estimated";
-      el.timingMode.textContent = el.timingMode.dataset.mode;
-      el.timingMode.classList.toggle("warn", mode === "estimated");
+      el.timingMode.classList.toggle("show", mode === "estimated");
     },
     onDone: () => {
       el.progressFill.style.width = "100%";
-      el.timingMode.textContent = "done";
+      el.timingMode.classList.remove("show");
     },
   });
 
@@ -715,25 +992,33 @@ if (!WebSpeechEngine.available) {
   });
 
   el.play.addEventListener("click", () => {
-    const s = app.engine.state;
-    if (s === "playing") app.engine.pause();
-    else if (s === "paused") app.engine.resume();
-    else app.engine.speak(app.chunks, { startIndex: 0, tokensByChunk: app.tokensByChunk });
+    // Drop focus, or the button keeps Space to itself and the global
+    // shortcut below would fight with the browser's own activation.
+    el.play.blur();
+    togglePlayback();
   });
 
   el.stop.addEventListener("click", () => {
     app.engine.stop();
     app.renderer.clear();
-    el.progressFill.style.width = "0%";
-    el.timingMode.textContent = "idle";
-    el.timingMode.classList.remove("warn");
+    updateProgress(-1);
+    el.timingMode.classList.remove("show");
   });
 
   el.rate.addEventListener("input", () => {
     const r = parseFloat(el.rate.value);
-    el.rateVal.textContent = r.toFixed(2) + "×";
+    el.rateVal.textContent = `${+r.toFixed(2)}×`;
     app.engine.setRate(r);
+    updateProgress(app.renderer.active);   // rate changes the time estimate
+    syncSpeedSlider();
+    renderDial();
   });
+
+  // Browsers restore form state across a reload, and some do it without
+  // firing `input` — which would leave the slider, its label, and the
+  // engine's rate silently disagreeing. Sync once from whatever the
+  // control actually holds at startup.
+  el.rate.dispatchEvent(new Event("input"));
 
   el.reader.addEventListener("click", (e) => {
     const span = e.target.closest(".w");
@@ -741,27 +1026,42 @@ if (!WebSpeechEngine.available) {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && document.activeElement !== el.editor) {
-      e.preventDefault();
-      el.play.click();
-    }
+    if (e.code !== "Space" || e.repeat) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    // Leave Space alone wherever it already means something: typing in the
+    // editor, toggling a checkbox, opening a select.
+    const a = document.activeElement;
+    if (a && (a.isContentEditable || ["TEXTAREA", "INPUT", "SELECT"].includes(a.tagName))) return;
+
+    e.preventDefault();     // also stops the page scrolling
+    togglePlayback();
   });
 }
 
 el.edit.addEventListener("click", () => {
   const editing = !el.editor.classList.contains("hidden");
   if (editing) {
-    app.engine?.stop();
-    app.load(el.editor.value);
+    loadRaw(el.editor.value, "edited text");
     el.editor.classList.add("hidden");
     el.reader.classList.remove("hidden");
     el.edit.textContent = "Edit text";
   } else {
-    el.editor.value = app.text;
+    // Show the untouched source, not the cleaned rendering — otherwise
+    // editing would silently bake the stripping into the text.
+    el.editor.value = app.raw ? app.raw.text : app.text;
     el.editor.classList.remove("hidden");
     el.reader.classList.add("hidden");
     el.edit.textContent = "Done";
   }
+});
+
+el.clean.addEventListener("change", () => {
+  if (!app.raw) return;
+  app.engine?.stop();
+  app.renderer.clear();
+  app.load(prepareText(app.raw.text, app.raw));
+  toast(el.clean.checked ? "Markup cleaned" : "Showing raw text");
 });
 
 /* ------------------------------------------------------------------ *
@@ -777,22 +1077,89 @@ el.edit.addEventListener("click", () => {
 const TEXT_EXT = /\.(txt|md|markdown|text)$/i;
 
 /** Strip Markdown syntax that would otherwise be read aloud literally.
- *  Without this, "## Heading" is spoken as "hash hash Heading". */
+ *  Without this, "## Heading" is spoken as "hash hash Heading", a link is
+ *  read with its URL, and a table is read as a wall of pipe characters.
+ *
+ *  Order matters: code fences go first so their contents can't be mangled
+ *  by later rules, block-level syntax before inline, and emphasis last. */
 function stripMarkdown(src) {
-  return src
-    .replace(/```[\s\S]*?```/g, "")             // fenced code blocks
-    .replace(/`([^`]+)`/g, "$1")                 // inline code
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")    // images -> alt text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")     // links -> link text
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")          // headings
-    .replace(/^\s{0,3}>\s?/gm, "")               // blockquotes
-    .replace(/^\s*[-*+]\s+/gm, "")               // bullets
-    .replace(/^\s*\d+\.\s+/gm, "")               // numbered lists
-    .replace(/^\s*[-*_]{3,}\s*$/gm, "")          // horizontal rules
-    .replace(/(\*\*|__)(.*?)\1/g, "$2")          // bold
-    .replace(/(\*|_)(.*?)\1/g, "$2")             // italic
+  // Backslash-escaped punctuation is stashed before anything else runs.
+  // Otherwise an escaped \* is still a bare asterisk during emphasis
+  // matching, and a lone asterisk elsewhere in the document pairs with it,
+  // swallowing everything in between.
+  const S = "\0";
+  const stashed = src.replace(
+    /\\([\\`*_{}\[\]()#+\-.!>~|])/g,
+    (_, c) => S + c.charCodeAt(0) + S
+  );
+
+  const out = stashed
+    // Code blocks go first, so their contents cannot be mangled by any
+    // later rule. Reading source aloud helps nobody.
+    .replace(/^[ \t]*(```|~~~)[\s\S]*?^[ \t]*\1[ \t]*$/gm, "")
+    .replace(/<!--[\s\S]*?-->/g, "")                       // HTML comments
+    .replace(/<\/?[a-zA-Z][^>]*>/g, "")                    // inline HTML tags
+    .replace(/^\s{0,3}\[[^\]]+\]:\s*\S+.*$/gm, "")         // link definitions
+    .replace(/^([^\n]+)\n[ \t]{0,3}[=-]{2,}[ \t]*$/gm, "$1")  // setext headings
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")                    // ATX headings
+    .replace(/[ \t]+#+[ \t]*$/gm, "")                      // closing hashes
+    .replace(/^\s{0,3}>[ \t]?/gm, "")                      // blockquotes
+    .replace(/^\s{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/gm, "")  // horizontal rules
+    .replace(/^\s*[-*+][ \t]+\[[ xX]\][ \t]+/gm, "")       // task list items
+    .replace(/^\s*[-*+][ \t]+/gm, "")                      // bullets
+    .replace(/^\s*\d+[.)][ \t]+/gm, "")                    // ordered lists
+    // Tables: drop the separator row, then read the cells as a comma list.
+    .replace(/^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$/gm, "")
+    .replace(/^[ \t]*\|(.+)\|[ \t]*$/gm,
+      (_, row) => row.split("|").map((c) => c.trim()).filter(Boolean).join(", "))
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")              // images -> alt text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")               // inline links -> text
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")              // reference links
+    .replace(/<((?:https?|mailto):[^>]+)>/g, "$1")         // autolinks
+    .replace(/`+([^`]+)`+/g, "$1")                         // inline code
+    .replace(/~~([^~]+)~~/g, "$1")                         // strikethrough
+    // Emphasis must not span a blank line: a stray marker in one paragraph
+    // would otherwise pair with one several paragraphs away.
+    .replace(/(\*\*\*|___)(\S(?:(?:(?!\n\n)[\s\S])*?\S)?)\1/g, "$2")
+    .replace(/(\*\*|__)(\S(?:(?:(?!\n\n)[\s\S])*?\S)?)\1/g, "$2")
+    .replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, "$1")             // italic
+    // Underscore italics only at word boundaries, so snake_case survives.
+    .replace(/(^|[^A-Za-z0-9_])_(\S(?:[^_\n]*?\S)?)_(?![A-Za-z0-9])/g, "$1$2")
+    .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  // Restore the escaped characters as their literal selves.
+  return out.replace(
+    /\0(\d+)\0/g,
+    (_, code) => String.fromCharCode(Number(code))
+  );
+}
+
+/* Two independent signals before assuming Markdown, so ordinary prose that
+   happens to contain an asterisk isn't quietly rewritten. */
+const MARKDOWN_SIGNALS = [
+  /^\s{0,3}#{1,6}\s+\S/m,
+  /^\s{0,3}[-*+][ \t]+\S/m,
+  /^\s{0,3}\d+[.)][ \t]+\S/m,
+  /\[[^\]]+\]\([^)]+\)/,
+  /(^|\n)[ \t]*(```|~~~)/,
+  /\*\*\S[\s\S]*?\S\*\*/,
+  /^\s{0,3}>[ \t]+\S/m,
+  /^[ \t]*\|.+\|[ \t]*$/m,
+];
+
+function looksLikeMarkdown(s) {
+  return MARKDOWN_SIGNALS.filter((re) => re.test(s)).length >= 2;
+}
+
+/** Every input path funnels through here, so pasted and typed Markdown is
+ *  cleaned exactly like a dropped .md file. */
+function prepareText(raw, { forceMarkdown = false, cleanable = true } = {}) {
+  if (!cleanable || !el.clean.checked) return raw;
+  if (!forceMarkdown && !looksLikeMarkdown(raw)) return raw;
+  const cleaned = stripMarkdown(raw);
+  return cleaned.trim() ? cleaned : raw;   // never hand back an empty document
 }
 
 function toast(msg, ms = 2600) {
@@ -807,22 +1174,229 @@ function setSource(label) {
   document.getElementById("source").textContent = label;
 }
 
+/* ---------------------------- PDF ---------------------------------- *
+ * PDFs store glyphs at coordinates, not sentences. `getTextContent()`
+ * returns positioned fragments, so naively joining them yields garbage:
+ * no spaces where the layout implied them, a hard break at every visual
+ * line, and words split across lines by hyphenation.
+ *
+ * Read aloud, that is the difference between a document and noise —
+ * "inter-\nruption" becomes "inter" ... "ruption". So the fragments are
+ * reassembled into lines by baseline, lines into paragraphs by vertical
+ * gap, and hyphenated words rejoined before anything reaches the reader.
+ * ------------------------------------------------------------------- */
+
+const PDFJS_VERSION = "4.10.38";
+const PDFJS_BASE = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`;
+let pdfjsPromise = null;
+
+/** Fetched on first PDF only, so text and Markdown stay fully offline. */
+function loadPdfJs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import(/* webpackIgnore: true */ `${PDFJS_BASE}/pdf.min.mjs`)
+      .then((mod) => {
+        mod.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}/pdf.worker.min.mjs`;
+        return mod;
+      })
+      .catch((err) => { pdfjsPromise = null; throw err; });
+  }
+  return pdfjsPromise;
+}
+
+/** Group positioned fragments into lines, bucketing by baseline. */
+function linesFromItems(items) {
+  const lines = [];
+
+  for (const it of items) {
+    if (!it.str) continue;
+    const x = it.transform[4];
+    const y = it.transform[5];
+    const h = it.height || Math.abs(it.transform[3]) || 10;
+
+    // Glyphs on one visual line rarely share an exact baseline, so match
+    // within a fraction of the font height rather than on equality.
+    let line = null;
+    for (const l of lines) {
+      if (Math.abs(l.y - y) <= Math.max(1.5, l.h * 0.4)) { line = l; break; }
+    }
+    if (!line) { line = { y, h, parts: [] }; lines.push(line); }
+
+    line.parts.push({ x, w: it.width || 0, str: it.str });
+    line.h = Math.max(line.h, h);
+  }
+
+  lines.sort((a, b) => b.y - a.y);          // PDF origin sits bottom-left
+  for (const l of lines) l.parts.sort((a, b) => a.x - b.x);
+
+  return lines
+    .map((l) => ({ y: l.y, h: l.h, text: assembleLine(l).trim() }))
+    .filter((l) => l.text);
+}
+
+/** Join one line's fragments, inserting a space only at a real gap. */
+function assembleLine(line) {
+  let s = "";
+  let prevEnd = null;
+  for (const p of line.parts) {
+    if (
+      prevEnd !== null &&
+      p.x - prevEnd > line.h * 0.18 &&
+      !/\s$/.test(s) && !/^\s/.test(p.str)
+    ) {
+      s += " ";
+    }
+    s += p.str;
+    prevEnd = p.x + p.w;
+  }
+  return s;
+}
+
+/** Lines into paragraphs: a gap well above the median means a new one. */
+function joinLines(lines) {
+  if (!lines.length) return "";
+
+  const gaps = [];
+  for (let i = 1; i < lines.length; i++) gaps.push(lines[i - 1].y - lines[i].y);
+  const sorted = gaps.slice().sort((a, b) => a - b);
+  const median = sorted.length ? sorted[sorted.length >> 1] : 0;
+  const paraGap = median * 1.45;
+
+  let out = lines[0].text;
+  for (let i = 1; i < lines.length; i++) {
+    const gap = lines[i - 1].y - lines[i].y;
+    const cur = lines[i].text;
+
+    if (median > 0 && gap > paraGap) { out += "\n\n" + cur; continue; }
+
+    // Rejoin words split by end-of-line hyphenation, but leave real
+    // compounds alone — only a lowercase continuation is a split word.
+    if (/[A-Za-z]-$/.test(out) && /^[a-z]/.test(cur)) out = out.slice(0, -1) + cur;
+    else out += " " + cur;
+  }
+  return out;
+}
+
+/** Drop running heads, footers, and bare page numbers.
+ *  Detected by repetition across pages rather than by position, so a
+ *  first-page title isn't mistaken for a header. */
+function stripRunningHeaders(pageLines) {
+  if (pageLines.length < 3) return pageLines;
+
+  const norm = (s) => s.replace(/\d+/g, "#").trim().toLowerCase();
+  const top = new Map();
+  const bottom = new Map();
+
+  for (const lines of pageLines) {
+    if (!lines.length) continue;
+    const t = norm(lines[0].text);
+    const b = norm(lines[lines.length - 1].text);
+    top.set(t, (top.get(t) || 0) + 1);
+    bottom.set(b, (bottom.get(b) || 0) + 1);
+  }
+
+  const threshold = Math.max(3, pageLines.length * 0.5);
+
+  return pageLines.map((lines) => {
+    let out = lines;
+    if (out.length && (top.get(norm(out[0].text)) || 0) >= threshold) out = out.slice(1);
+    if (out.length && (bottom.get(norm(out[out.length - 1].text)) || 0) >= threshold) {
+      out = out.slice(0, -1);
+    }
+    return out.filter((l) => !/^\s*\d{1,4}\s*$/.test(l.text));
+  });
+}
+
+// Written as escapes, not literal glyphs: if this file is ever served
+// without a UTF-8 charset, literal ligatures decode to mojibake and the
+// character-class range below becomes a parse error that kills the whole
+// script. Escapes survive that.
+const LIGATURES = {
+  "\uFB00": "ff", "\uFB01": "fi", "\uFB02": "fl",
+  "\uFB03": "ffi", "\uFB04": "ffl", "\uFB05": "st", "\uFB06": "st",
+};
+
+/** Ligature glyphs and soft hyphens are invisible on screen but audible. */
+function normalizePdfText(s) {
+  return s
+    .replace(/[\uFB00-\uFB06]/g, (m) => LIGATURES[m] || m)
+    .replace(/\u00AD/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function extractPdf(file, onProgress) {
+  const pdfjs = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjs.getDocument({ data }).promise;
+
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    onProgress?.(i, doc.numPages);
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    pages.push(linesFromItems(content.items));
+  }
+
+  const text = normalizePdfText(
+    stripRunningHeaders(pages).map(joinLines).filter(Boolean).join("\n\n")
+  );
+
+  return { text, pages: doc.numPages };
+}
+
+/* ------------------------------------------------------------------ */
+
+/** Holds on to the untouched source so the Clean markup toggle can switch
+ *  between raw and cleaned without needing the original file again. */
+function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "" } = {}) {
+  app.raw = { text: raw, forceMarkdown, cleanable };
+  app.engine?.stop();
+  app.renderer.clear();
+  app.load(prepareText(raw, { forceMarkdown, cleanable }));
+  setSource(label);
+  toast(`Loaded ${label}${note}`);
+}
+
 async function importFile(file) {
-  if (!TEXT_EXT.test(file.name) && !file.type.startsWith("text/")) {
-    toast(`Can't read ${file.name} — plain text and Markdown only for now.`);
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+  const isText = TEXT_EXT.test(file.name) || file.type.startsWith("text/");
+
+  if (!isPdf && !isText) {
+    toast(`Can't read ${file.name} — text, Markdown, and PDF only.`);
     return;
   }
+
   try {
+    if (isPdf) {
+      toast(`Reading ${file.name}…`, 60000);
+      const { text, pages } = await extractPdf(file, (n, total) => {
+        toast(`Extracting page ${n} of ${total}…`, 60000);
+      });
+
+      if (!text.trim()) {
+        toast("No text found — this PDF is probably scanned images, which need OCR.");
+        return;
+      }
+      // Extracted PDF prose is already plain; running the Markdown stripper
+      // over it could only damage it.
+      loadRaw(text, file.name, {
+        cleanable: false,
+        note: ` · ${pages} page${pages === 1 ? "" : "s"}`,
+      });
+      return;
+    }
+
     const raw = await file.text();
-    const text = /\.(md|markdown)$/i.test(file.name) ? stripMarkdown(raw) : raw;
-    if (!text.trim()) { toast("That file is empty."); return; }
-    app.engine?.stop();
-    app.renderer.clear();
-    app.load(text);
-    setSource(file.name);
-    toast(`Loaded ${file.name}`);
+    if (!raw.trim()) { toast("That file is empty."); return; }
+    loadRaw(raw, file.name, { forceMarkdown: /\.(md|markdown)$/i.test(file.name) });
   } catch (err) {
-    toast(`Couldn't read that file: ${err.message}`);
+    const offline = /Failed to fetch|dynamically imported|NetworkError/i.test(err.message || "");
+    toast(
+      offline
+        ? "Couldn't load the PDF library — PDF support needs a network connection."
+        : `Couldn't read that file: ${err.message}`
+    );
   }
 }
 
@@ -843,11 +1417,9 @@ document.getElementById("btnPaste").addEventListener("click", async () => {
   try {
     const text = await navigator.clipboard.readText();
     if (!text.trim()) { toast("Clipboard is empty."); return; }
-    app.engine?.stop();
-    app.renderer.clear();
-    app.load(text);
-    setSource("pasted text");
-    toast(`Loaded ${text.length.toLocaleString()} characters`);
+    loadRaw(text, "pasted text", {
+      note: ` · ${text.length.toLocaleString()} characters`,
+    });
   } catch (_) {
     // Firefox and Safari deny readText without a user permission grant.
     toast("Browser blocked clipboard read — use Edit text instead.");
@@ -875,5 +1447,146 @@ window.addEventListener("drop", (e) => {
   if (file) importFile(file);
 });
 
+/* ------------------------------------------------------------------ *
+ * 7. PLAYER CONTROLS
+ * ------------------------------------------------------------------ */
+
+/** Icon buttons drive hidden checkboxes, so the state lives in one place
+ *  and the existing change handlers keep working untouched. */
+function bindToggle(button, input, { announce } = {}) {
+  const sync = () => button.setAttribute("aria-pressed", String(input.checked));
+  button.addEventListener("click", () => {
+    input.checked = !input.checked;
+    sync();
+    input.dispatchEvent(new Event("change"));
+    if (announce) toast(announce(input.checked));
+  });
+  sync();
+}
+
+bindToggle(el.btnClean, el.clean);   // its own change handler already toasts
+bindToggle(el.btnFollow, el.autoscroll, {
+  announce: (on) => (on ? "Following the spoken word" : "Follow off"),
+});
+
+/* --- text size --- */
+const READER_SIZES = [17, 20, 23, 27];
+let sizeIndex = 1;
+el.btnFont.addEventListener("click", () => {
+  sizeIndex = (sizeIndex + 1) % READER_SIZES.length;
+  document.documentElement.style.setProperty("--reader-size", `${READER_SIZES[sizeIndex]}px`);
+  toast(`Text size ${READER_SIZES[sizeIndex]}px`);
+});
+
+/* --- speed --- *
+ * The slider moves over ladder indices rather than raw rates, so every
+ * position lands exactly on a defined speed instead of somewhere between
+ * two of them. The hidden #rate input stays the single source of truth. */
+const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+
+el.speedSlider.max = String(SPEEDS.length - 1);
+el.dial = document.getElementById("speedDial");
+el.dialArc = document.getElementById("dialArc");
+
+const DIAL_R = 16;
+const DIAL_CIRCUM = 2 * Math.PI * DIAL_R;
+const DIAL_SWEEP = DIAL_CIRCUM * 0.75;   // 270 degrees, gap at the bottom
+
+el.dial.setAttribute("aria-valuemax", String(SPEEDS.length - 1));
+document.querySelector(".dial-track").style.strokeDasharray =
+  `${DIAL_SWEEP.toFixed(2)} ${DIAL_CIRCUM.toFixed(2)}`;
+
+function setSpeedIndex(i) {
+  const clamped = Math.max(0, Math.min(SPEEDS.length - 1, Math.round(i)));
+  if (Number(el.speedSlider.value) === clamped && el.dialArc.style.strokeDasharray) return;
+  el.speedSlider.value = String(clamped);
+  el.rate.value = String(SPEEDS[clamped]);
+  el.rate.dispatchEvent(new Event("input"));   // reuses the existing handler
+}
+
+function renderDial() {
+  const i = Number(el.speedSlider.value);
+  const filled = DIAL_SWEEP * (i / (SPEEDS.length - 1));
+  el.dialArc.style.strokeDasharray = `${filled.toFixed(2)} ${DIAL_CIRCUM.toFixed(2)}`;
+  el.dial.setAttribute("aria-valuenow", String(i));
+  el.dial.setAttribute("aria-valuetext", `${SPEEDS[i]} times speed`);
+}
+
+/* Drag vertically to turn it; a tap without movement steps up one notch. */
+let dialDrag = null;
+const DIAL_PIXELS_PER_STEP = 11;
+
+el.dial.addEventListener("pointerdown", (e) => {
+  dialDrag = { y: e.clientY, from: Number(el.speedSlider.value), moved: false };
+  el.dial.setPointerCapture(e.pointerId);
+});
+
+el.dial.addEventListener("pointermove", (e) => {
+  if (!dialDrag) return;
+  const steps = Math.round((dialDrag.y - e.clientY) / DIAL_PIXELS_PER_STEP);
+  if (steps !== 0) dialDrag.moved = true;
+  setSpeedIndex(dialDrag.from + steps);
+});
+
+el.dial.addEventListener("pointerup", (e) => {
+  if (dialDrag && !dialDrag.moved) {
+    const i = Number(el.speedSlider.value);
+    setSpeedIndex(i >= SPEEDS.length - 1 ? 0 : i + 1);   // tap cycles, wrapping
+  }
+  dialDrag = null;
+  el.dial.releasePointerCapture?.(e.pointerId);
+});
+el.dial.addEventListener("pointercancel", () => { dialDrag = null; });
+
+el.dial.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  setSpeedIndex(Number(el.speedSlider.value) + (e.deltaY < 0 ? 1 : -1));
+}, { passive: false });
+
+el.dial.addEventListener("keydown", (e) => {
+  const i = Number(el.speedSlider.value);
+  if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); setSpeedIndex(i + 1); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); setSpeedIndex(i - 1); }
+  else if (e.key === "Home") { e.preventDefault(); setSpeedIndex(0); }
+  else if (e.key === "End") { e.preventDefault(); setSpeedIndex(SPEEDS.length - 1); }
+});
+
+/** Keep the slider on the right notch when the rate is changed elsewhere. */
+function syncSpeedSlider() {
+  const current = parseFloat(el.rate.value);
+  let nearest = 0;
+  for (let i = 1; i < SPEEDS.length; i++) {
+    if (Math.abs(SPEEDS[i] - current) < Math.abs(SPEEDS[nearest] - current)) nearest = i;
+  }
+  el.speedSlider.value = String(nearest);
+}
+
+/* --- sentence skip --- */
+function skipSentence(delta) {
+  const ranges = app.sentenceRanges;
+  if (!ranges || !ranges.length) return;
+  const active = app.renderer.active;
+  const from = active >= 0 ? app.sentenceOfToken[active] : 0;
+
+  // Ranges can have gaps where a split produced no words, so walk past them.
+  let target = from + delta;
+  while (target >= 0 && target < ranges.length && !ranges[target]) target += delta || 1;
+  target = Math.max(0, Math.min(ranges.length - 1, target));
+
+  const range = ranges[target];
+  if (range) app.seekToToken(range[0]);
+}
+el.back.addEventListener("click", () => skipSentence(-1));
+el.fwd.addEventListener("click", () => skipSentence(1));
+
+/* --- scrub --- */
+el.seekBar.addEventListener("click", (e) => {
+  if (!app.tokens.length) return;
+  const box = el.seekBar.getBoundingClientRect();
+  const fraction = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+  app.seekToToken(Math.min(app.tokens.length - 1, Math.floor(fraction * app.tokens.length)));
+});
+
+app.raw = { text: SAMPLE, forceMarkdown: false, cleanable: true };
 app.load(SAMPLE);
 </script>
