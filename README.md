@@ -6,6 +6,10 @@ band marking the sentence around it.
 Single HTML file, no build step, no backend. Open `index.html` in a browser and
 it works.
 
+Grab a build from the [Releases page](../../releases) — desktop is that same
+HTML file zipped with the README and license; Android is an installable APK
+built from `android/`.
+
 ## Quick start
 
 ```bash
@@ -192,6 +196,21 @@ fetches pdf.js from a CDN, so a PDF opened in the app needs a network
 connection; text and Markdown work fully offline. If you care about offline
 PDFs — or about the fact that a CDN script shares the page with a JavaScript
 bridge — vendor pdf.js into the assets instead.
+
+## Releasing
+
+Push a tag matching `v*` (e.g. `v1.0.0`) and
+[Release](.github/workflows/release.yml) builds both artifacts and publishes
+them together as a GitHub Release: the desktop zip (`index.html` + README +
+license) and the Android APK, version-stamped from the tag.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The Android build there is debug-signed, the same as CI — see the note at
+the top of the workflow if you want a real release signing key instead.
 
 ## License
 

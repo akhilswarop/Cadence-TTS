@@ -1,0 +1,128 @@
+name: Release
+
+# Builds both distributables and publishes them to one GitHub Release.
+#
+# "Desktop" is just index.html, zipped — there is no separate desktop app.
+# Cadence TTS is a single self-contained HTML file; on a desktop, running it
+# means opening that file in a browser, so the desktop release is exactly
+# the artifact that already exists, with README/LICENSE alongside it.
+#
+# The Android APK is signed with the debug key, not a real release key. A
+# real key is a long-lived secret you generate and hold yourself — minting
+# a throwaway one in CI would sign every release differently and break
+# Android's update mechanism between versions. Debug-signed is honest about
+# what this is: an installable APK for direct sideloading, not a Play Store
+# submission. Swap in a proper signingConfig fed by repo secrets if that
+# changes.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      name: ${{ steps.v.outputs.name }}
+      code: ${{ steps.v.outputs.code }}
+    steps:
+      - id: v
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # versionCode must only ever increase across releases; the run
+          # number does that without needing to parse the tag as semver.
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the platform and build-tools this project targets
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble debug APK
+        run: |
+          gradle assembleDebug --no-daemon \
+            -PAPP_VERSION_CODE=${{ needs.version.outputs.code }} \
+            -PAPP_VERSION_NAME=${{ needs.version.outputs.name }}
+
+      - name: Rename for the release asset
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             "dist/cadence-tts-${{ needs.version.outputs.tag }}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/dist/*.apk
+          if-no-files-found: error
+
+  desktop:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - name: Zip the desktop build
+        run: |
+          mkdir -p dist/cadence-tts-desktop
+          cp index.html README.md LICENSE dist/cadence-tts-desktop/
+          cd dist
+          zip -r "cadence-tts-${{ needs.version.outputs.tag }}-desktop.zip" cadence-tts-desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [version, android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Cadence TTS ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          files: assets/*
+          body: |
+            **Desktop:** download the zip, unzip it, open `index.html` in a browser. No install.
+
+            **Android:** download the APK and install it directly (you'll need to allow installs from this source). Signed with the debug key, not a Play Store release.
