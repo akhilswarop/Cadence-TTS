@@ -8,9 +8,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
+import android.graphics.Insets;
+import android.os.Build;
+import android.view.WindowInsets;
 
 import java.util.Locale;
 
@@ -36,6 +36,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // API 35 enforces edge-to-edge and ignores fitsSystemWindows; the
+        // window must explicitly say it is handling insets itself, or the
+        // listener below still fires but the content behind it is wrong.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
 
         web = new WebView(this);
 
@@ -83,9 +90,25 @@ public class MainActivity extends Activity {
          * player painting behind the status and gesture bars while their
          * content stays clear of them.
          */
-        ViewCompat.setOnApplyWindowInsetsListener(web, (view, windowInsets) -> {
-            Insets bars = windowInsets.getInsets(
-                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+        web.setOnApplyWindowInsetsListener((view, windowInsets) -> {
+            int top, bottom, left, right;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Insets bars = windowInsets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                top = bars.top;
+                bottom = bars.bottom;
+                left = bars.left;
+                right = bars.right;
+            } else {
+                // Pre-30 has no typed insets; the deprecated accessors are the
+                // only option and already fold the cutout into the top inset.
+                top = windowInsets.getSystemWindowInsetTop();
+                bottom = windowInsets.getSystemWindowInsetBottom();
+                left = windowInsets.getSystemWindowInsetLeft();
+                right = windowInsets.getSystemWindowInsetRight();
+            }
+
             float density = getResources().getDisplayMetrics().density;
 
             insetScript = String.format(Locale.US,
@@ -95,8 +118,8 @@ public class MainActivity extends Activity {
                     "s.setProperty('--safe-left','%.2fpx');" +
                     "s.setProperty('--safe-right','%.2fpx');" +
                     "})(document.documentElement.style)",
-                    bars.top / density, bars.bottom / density,
-                    bars.left / density, bars.right / density);
+                    top / density, bottom / density,
+                    left / density, right / density);
 
             ((WebView) view).evaluateJavascript(insetScript, null);
             return windowInsets;

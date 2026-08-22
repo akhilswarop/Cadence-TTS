@@ -153,17 +153,41 @@ the browser version.
 
 ### Building
 
-The Gradle wrapper jar is a binary and is not committed, so generate it once:
+**CI (recommended, no local setup):** push to `main` or run the
+[Android CI](.github/workflows/android.yml) workflow manually from the
+Actions tab. GitHub's runner has a real JDK and Gradle install, so it needs
+none of the workarounds below. The signed-with-debug-key APK is attached to
+the run as the `cadence-tts-debug` artifact.
+
+**Locally, with Android Studio:** open `android/` and let Studio generate the
+Gradle wrapper on sync, then
 
 ```bash
 cd android
-gradle wrapper          # or open the android/ folder in Android Studio, which does this on sync
 ./gradlew assembleDebug
 ```
 
-The APK lands in `android/app/build/outputs/apk/debug/`.
+The APK lands in `android/app/build/outputs/apk/debug/`. Requires JDK 17+ and
+an Android SDK with platform 35.
 
-Requires JDK 17+ and an Android SDK with platform 35. Note that PDF import
+**Locally, without Gradle at all:** `android/build-direct.ps1` drives the SDK
+command-line tools directly — `aapt2`, `javac`, `d8`, `apksigner`,
+`zipalign` — bypassing Gradle entirely. It exists for exactly one situation:
+Android Studio is installed but its bundled Gradle isn't exposed as a plain
+`gradle` binary, and no standalone Gradle distribution is present, so there
+is no `gradle wrapper` to run in the first place.
+
+```powershell
+cd android
+.\build-direct.ps1 -Install    # -Install pushes to a connected device over adb
+```
+
+It has no dependency resolution and no incremental compilation, and won't
+scale past what this single-module app currently is — reach for the CI
+workflow or a real Gradle install once either is available. See the comment
+at the top of the script for the full explanation.
+
+Note that PDF import
 fetches pdf.js from a CDN, so a PDF opened in the app needs a network
 connection; text and Markdown work fully offline. If you care about offline
 PDFs — or about the fact that a CDN script shares the page with a JavaScript

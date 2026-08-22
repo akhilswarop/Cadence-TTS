@@ -1,0 +1,54 @@
+name: Android CI
+
+# Builds the debug APK on GitHub's own runners, which carry a real JDK and
+# Gradle install. This exists because no committed Gradle wrapper ships with
+# the repo (the wrapper jar is a binary this project doesn't author) and
+# local machines can't be relied on to have Gradle set up — see
+# android/build-direct.ps1 for the workaround used before this existed.
+#
+# gradle/actions/setup-gradle installs Gradle itself, so `gradle` below
+# needs no wrapper to run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "index.html"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "index.html"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the platform and build-tools this project targets
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadence-tts-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
