@@ -7,8 +7,8 @@ Single HTML file, no build step, no dependencies, no backend. Open `index.html` 
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/cadence.git
-cd cadence
+git clone https://github.com/akhilswarop/Cadence.git
+cd Cadence
 start index.html      # Windows;  macOS: open index.html
 ```
 
