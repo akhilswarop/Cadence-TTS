@@ -78,7 +78,12 @@
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
-  .tb-left, .tb-right { display: flex; align-items: center; gap: 4px; }
+  /* min-width: 0 is required. Grid items default to min-width: auto, so the
+     voice select refuses to shrink below the width of its longest option
+     name and pushes the whole page into horizontal scroll. */
+  .tb-left, .tb-right {
+    display: flex; align-items: center; gap: 4px; min-width: 0;
+  }
   .tb-right { justify-content: flex-end; }
 
   .tb-title {
@@ -107,7 +112,7 @@
     font: inherit; font-size: 12px;
     color: var(--muted); background: var(--chip);
     border: 1px solid transparent; border-radius: 9px;
-    padding: 6px 8px; max-width: 168px; cursor: pointer;
+    padding: 6px 8px; max-width: 168px; min-width: 0; cursor: pointer;
   }
   select#voice:hover { color: var(--text); }
 
