@@ -1068,7 +1068,12 @@ function buildFromDom(root) {
   let spoken = "";
 
   const endBlock = () => {
-    if (spoken && !/\n\n$/.test(spoken)) spoken += "\n\n";
+    // Drop a trailing space left by a whitespace-only sibling text node
+    // (indentation before a closing tag, say) before deciding whether a
+    // break is needed — otherwise that space sits between the real content
+    // and the \n\n, and survives untouched by the check below.
+    spoken = spoken.replace(/[ \t]+$/, "");
+    if (spoken && !spoken.endsWith("\n\n")) spoken += "\n\n";
   };
 
   function walk(node) {
@@ -1081,10 +1086,30 @@ function buildFromDom(root) {
       // treats any \n as a sentence boundary, so that single stray newline
       // becomes a chunk split, and each chunk is its own TTS utterance: the
       // engine adds a full-stop pause at a point with no actual punctuation.
-      // Not trimming the ends, since a single boundary space between two
-      // inline elements (a bold span followed by a word, say) is real.
-      const text = node.nodeValue.replace(/\s+/g, " ");
+      let text = node.nodeValue.replace(/\s+/g, " ");
       if (!text) return;
+
+      // A text node that is nothing but formatting whitespace — the
+      // indentation between two sibling block tags in pretty-printed XHTML,
+      // extremely common in hand-formatted EPUBs — carries no words, so it
+      // never needs its own span. What it must not do is leak a literal
+      // space into the spoken text right at a paragraph boundary. Appending
+      // at most one space, and only when spoken doesn't already end in
+      // whitespace, keeps a genuine inline gap (a bold span followed by a
+      // word) while dropping the block-boundary case entirely.
+      if (!node.nodeValue.trim()) {
+        if (spoken && !/\s$/.test(spoken)) spoken += " ";
+        return;
+      }
+
+      // The other half of the same rule, for a node that is NOT pure
+      // whitespace: its own leading indentation is still real whitespace
+      // and still collapses to a leading space above — e.g. "<p>\n  Alice
+      // was…" — and if this is the first content of a fresh block, that
+      // leading space would land directly after the "\n\n" just inserted.
+      // Only strip it in that position; a leading space here otherwise is
+      // a genuine inline gap after a preceding sibling.
+      if (spoken.endsWith("\n\n") && text.startsWith(" ")) text = text.slice(1);
 
       const base = spoken.length;
       const frag = document.createDocumentFragment();
@@ -1217,9 +1242,20 @@ function sanitizeEpubChapter(doc, resources) {
     if (node.nodeType === Node.COMMENT_NODE) return null;
     if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.nodeValue);
     if (node.nodeType !== Node.ELEMENT_NODE) return null;
-    if (DROP_TAGS.has(node.tagName)) return null;
 
-    if (node.tagName === "IMG") {
+    // XHTML is XML, and XML preserves source casing exactly — real EPUB
+    // chapters are written in lowercase ("<p>", "<h1>"), so a chapter that
+    // happens to parse cleanly under application/xhtml+xml (rather than
+    // falling back to the lenient text/html parser, which does uppercase
+    // everything) hands this function tagName values like "p", not "P".
+    // Every comparison below normalises to uppercase for exactly that
+    // reason; without it, every element here fell through to the "unknown"
+    // branch and no paragraph or heading break ever fired, so a whole
+    // chapter read as one unbroken run of text.
+    const tagName = node.tagName.toUpperCase();
+    if (DROP_TAGS.has(tagName)) return null;
+
+    if (tagName === "IMG") {
       const src = node.getAttribute("src");
       const resolved = src && resources.get(src.replace(/^\.?\//, ""));
       if (!resolved) return null;   // no local resource to show it from
@@ -1230,9 +1266,9 @@ function sanitizeEpubChapter(doc, resources) {
       return img;
     }
 
-    const tag = node.tagName === "A" ? "a" : node.tagName.toLowerCase();
+    const tag = tagName === "A" ? "a" : tagName.toLowerCase();
     const out = document.createElement(
-      /^(H[1-6]|P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|CODE|EM|I|STRONG|B|BR|HR|SPAN|DIV|A|SUP|SUB)$/.test(node.tagName)
+      /^(H[1-6]|P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|CODE|EM|I|STRONG|B|BR|HR|SPAN|DIV|A|SUP|SUB)$/.test(tagName)
         ? tag
         : "span"   // unknown elements keep their text but not their identity
     );
