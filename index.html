@@ -1988,12 +1988,6 @@ if (!Engine) {
     renderDial();
   });
 
-  // Browsers restore form state across a reload, and some do it without
-  // firing `input` — which would leave the slider, its label, and the
-  // engine's rate silently disagreeing. Sync once from whatever the
-  // control actually holds at startup.
-  el.rate.dispatchEvent(new Event("input"));
-
   el.reader.addEventListener("click", (e) => {
     const span = e.target.closest(".w");
     if (span) app.seekToToken(parseInt(span.dataset.i, 10));
@@ -2672,4 +2666,13 @@ if ("serviceWorker" in navigator) {
 
 app.raw = { text: SAMPLE, forceMarkdown: false, cleanable: true };
 app.load(SAMPLE);
+
+// Browsers restore form state across a reload, and some do it without
+// firing `input` — which would leave the slider, its label, the speed
+// dial, and the engine's rate silently disagreeing. Sync once from
+// whatever the control actually holds at startup. Deliberately the very
+// last statement in the file: this handler touches SPEEDS and the dial,
+// both defined further down in the Player Controls section, and firing
+// it any earlier hits them before their const declarations run.
+el.rate.dispatchEvent(new Event("input"));
 </script>
