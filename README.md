@@ -10,6 +10,13 @@ Grab a build from the [Releases page](../../releases) — desktop is that same
 HTML file zipped with the README and license; Android is an installable APK
 built from `android/`.
 
+**Or install it as an app** if it's served over HTTPS (or you're running it
+locally): Chrome and Edge show an "Install" icon in the address bar once the
+page has loaded, since it ships a manifest and a service worker. Installed,
+it opens in its own window with its own icon and keeps working offline —
+no download, no build. This needs actual hosting, not the `file://` path;
+see the note in [Releasing](#releasing) below.
+
 ## Quick start
 
 ```bash
@@ -211,6 +218,12 @@ git push origin v1.0.0
 
 The Android build there is debug-signed, the same as CI — see the note at
 the top of the workflow if you want a real release signing key instead.
+
+**Hosting the installable app:** this needs GitHub Pages (or any static
+host) — a service worker won't register over `file://`. Pages works out of
+the box on a public repo; a private one may need a paid plan depending on
+your GitHub account type. `Settings → Pages → Deploy from a branch → main
+→ / (root)`.
 
 ## License
 

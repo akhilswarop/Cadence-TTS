@@ -1,6 +1,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence TTS — word-synced reader</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#EEF0F6">
 <style>
   :root {
     --bg: #eef0f6;
@@ -2280,6 +2283,18 @@ el.seekBar.addEventListener("click", (e) => {
   const fraction = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
   app.seekToToken(Math.min(app.tokens.length - 1, Math.floor(fraction * app.tokens.length)));
 });
+
+/* Registers the service worker so the browser can offer "Install app" and
+   the page keeps working offline once installed. Relative path, so this
+   still resolves correctly if the site is ever served from a subpath
+   (e.g. a GitHub Pages project site at /Cadence-TTS/). No custom install
+   button — Chrome and Edge already show one in the address bar once this
+   and the manifest are in place, which is simpler than reimplementing it. */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
 
 app.raw = { text: SAMPLE, forceMarkdown: false, cleanable: true };
 app.load(SAMPLE);
