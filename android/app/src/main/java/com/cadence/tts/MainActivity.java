@@ -1,8 +1,13 @@
 package com.cadence.tts;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.net.Uri;
 import android.os.Bundle;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -24,6 +29,18 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private TtsBridge bridge;
+
+    /*
+     * A plain WebView has no file-chooser UI of its own — that is Chrome's
+     * behaviour, not the WebView component's. Without a WebChromeClient
+     * implementing onShowFileChooser, clicking the page's <input
+     * type="file"> does nothing at all, which is exactly the symptom this
+     * fixes. Using the pre-androidx Activity.startActivityForResult here
+     * rather than the newer Activity Result API, consistent with the rest
+     * of this project's choice to depend on nothing beyond the platform SDK.
+     */
+    private ValueCallback<Uri[]> pendingFileChoice;
+    private static final int FILE_CHOOSER_REQUEST = 51;
 
     /*
      * Insets usually arrive before the page has finished loading, so the
@@ -125,11 +142,40 @@ public class MainActivity extends Activity {
             return windowInsets;
         });
 
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                              FileChooserParams params) {
+                // A second chooser request while one is already pending would
+                // otherwise leak the first callback; the contract requires
+                // every callback to be resolved exactly once.
+                if (pendingFileChoice != null) pendingFileChoice.onReceiveValue(null);
+                pendingFileChoice = callback;
+
+                try {
+                    startActivityForResult(params.createIntent(), FILE_CHOOSER_REQUEST);
+                } catch (ActivityNotFoundException e) {
+                    pendingFileChoice = null;
+                    return false;
+                }
+                return true;
+            }
+        });
+
         bridge = new TtsBridge(web, this);
         web.addJavascriptInterface(bridge, "AndroidTTS");
 
         web.loadUrl("file:///android_asset/index.html");
         setContentView(web);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST || pendingFileChoice == null) return;
+        pendingFileChoice.onReceiveValue(
+                WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+        pendingFileChoice = null;
     }
 
     @Override

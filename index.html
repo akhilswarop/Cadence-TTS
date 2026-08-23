@@ -3,43 +3,13 @@
 <title>Cadence TTS — word-synced reader</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#EEF0F6">
+<meta name="theme-color" content="#101218">
 <style>
+  /* Dark by default, unconditionally — not "follows system preference",
+     which would still show light on a light-mode system. A system light
+     preference no longer has any effect; :root[data-theme="light"] is kept
+     as a hook for a future manual toggle, since nothing sets it today. */
   :root {
-    --bg: #eef0f6;
-    --paper: #ffffff;
-    --line: #e2e5ee;
-    --text: #191b22;
-    --muted: #838a9c;
-    --accent: #2f4bf0;
-    --accent-ink: #ffffff;
-    --sentence: #e8e6fd;
-    --word: #c3bcf9;
-    --word-ink: #1a1440;
-    --spoken: #9aa0b0;
-    --chip: #f3f4f9;
-    --shadow-sm: 0 1px 2px rgba(20,25,50,.06);
-    --shadow-lg: 0 4px 12px rgba(20,25,50,.08), 0 16px 40px rgba(20,25,50,.10);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #101218;
-      --paper: #181b23;
-      --line: #262a35;
-      --text: #e9ebf2;
-      --muted: #838a9c;
-      --accent: #6b83ff;
-      --accent-ink: #0b0d14;
-      --sentence: #262a4d;
-      --word: #4a44a8;
-      --word-ink: #f2f0ff;
-      --spoken: #5d6475;
-      --chip: #1f2430;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
-      --shadow-lg: 0 4px 12px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="dark"] {
     --bg: #101218;
     --paper: #181b23;
     --line: #262a35;
@@ -54,6 +24,22 @@
     --chip: #1f2430;
     --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
     --shadow-lg: 0 4px 12px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef0f6;
+    --paper: #ffffff;
+    --line: #e2e5ee;
+    --text: #191b22;
+    --muted: #838a9c;
+    --accent: #2f4bf0;
+    --accent-ink: #ffffff;
+    --sentence: #e8e6fd;
+    --word: #c3bcf9;
+    --word-ink: #1a1440;
+    --spoken: #9aa0b0;
+    --chip: #f3f4f9;
+    --shadow-sm: 0 1px 2px rgba(20,25,50,.06);
+    --shadow-lg: 0 4px 12px rgba(20,25,50,.08), 0 16px 40px rgba(20,25,50,.10);
   }
 
   * { box-sizing: border-box; }
@@ -90,21 +76,30 @@
 
   .topbar {
     position: sticky; top: 0; z-index: 20;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 10px;
-    padding: 10px calc(16px + var(--safe-right)) 10px calc(16px + var(--safe-left));
-    padding-top: calc(10px + var(--safe-top));
+    /* Safe-area padding is asymmetric on purpose — extra room for the
+       status bar/cutout on top, none needed on the bottom — which is
+       exactly why it lives here and not on .topbar-row below: putting it
+       on the row would shift that row's own vertical centre away from
+       where its content actually sits. */
+    padding-top: var(--safe-top);
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
-  /* Centred on the bar itself, not on the space left between the two
+  /* The row's padding is symmetric (10px top and bottom alike), so its
+     geometric centre and its flex content's visual centre are the same
+     point — which .tb-mid's absolute centring below depends on. */
+  .topbar-row {
+    position: relative;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+    padding: 10px calc(16px + var(--safe-right)) 10px calc(16px + var(--safe-left));
+  }
+  /* Centred on the row itself, not on the space left between the two
      button clusters — the desktop icon row is far wider than the single
      folder icon opposite it, so centring within the leftover middle track
-     visibly drifted toward the light side. Absolute positioning against
-     .topbar (already a positioned element via sticky) is immune to that
-     imbalance; pointer-events: none because the title is a label, not a
-     control, so it never intercepts a click meant for whatever it may
-     visually overlap at very narrow widths. */
+     visibly drifted toward the light side. pointer-events: none because
+     the title is a label, not a control, so it never intercepts a click
+     meant for whatever it may visually overlap at very narrow widths. */
   .tb-mid {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     max-width: min(60vw, 420px);
@@ -451,6 +446,7 @@
 </style>
 
 <header class="topbar">
+ <div class="topbar-row">
   <div class="tb-left">
     <button class="ic" id="btnOpen" data-label="Open file" title="Open a file" aria-label="Open a file">
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z"/></svg>
@@ -494,6 +490,7 @@
     <input type="checkbox" id="autoscroll" class="hidden" checked>
     <input type="range" id="rate" class="hidden" min="0.5" max="5" step="any" value="1">
   </div>
+ </div>
 </header>
 
 <main>
