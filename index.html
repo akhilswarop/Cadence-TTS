@@ -138,13 +138,13 @@
   #tools { display: flex; align-items: center; gap: 4px; min-width: 0; }
   #btnMore { display: none; }
 
-  select#voice {
+  select#voice, select#chapterSelect {
     font: inherit; font-size: 12px;
     color: var(--muted); background: var(--chip);
     border: 1px solid transparent; border-radius: 9px;
     padding: 6px 8px; max-width: 168px; min-width: 0; cursor: pointer;
   }
-  select#voice:hover { color: var(--text); }
+  select#voice:hover, select#chapterSelect:hover { color: var(--text); }
 
   /* ----------------------------- paper ----------------------------- */
 
@@ -170,6 +170,11 @@
     line-height: 1.95;
     white-space: pre-wrap;
     word-wrap: break-word;
+  }
+  .empty-notice {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px; font-style: italic; color: var(--muted);
+    text-align: center; margin: 2em 0 0;
   }
 
   /* Two highlight levels: a soft band marking the sentence being spoken,
@@ -393,10 +398,15 @@
   /* On a phone the sheet metaphor just wastes the width the text needs, so
      the panel goes full-bleed: no gutters, no radius, no shadow, and tall
      enough to cover the screen even when the document is short. */
-  /* Eight controls never fit across a phone, so below this width the
-     secondary ones collapse into a sheet behind the overflow button and
-     pick up text labels, which a 34px icon cannot carry on its own. */
-  @media (max-width: 720px) {
+  /* Nine controls plus two selects never fit across a phone, so below this
+     width the secondary ones collapse into a sheet behind the overflow
+     button and pick up text labels, which a 34px icon cannot carry alone.
+     1100px rather than a phone-only breakpoint: with the chapter select
+     added alongside the voice select, the inline cluster can reach ~600px
+     wide, which on anything narrower makes the cluster's own left edge
+     fall before the bar's true centre — no amount of repositioning the
+     title fixes that, the cluster itself has to shrink first. */
+  @media (max-width: 1100px) {
     #btnMore { display: inline-flex; }
 
     #tools {
@@ -422,7 +432,9 @@
       font-size: 13.5px; font-weight: 500; color: var(--text);
     }
     #tools .ic[aria-pressed="true"]::after { color: var(--accent); }
-    #tools select#voice { width: 100%; max-width: none; height: 40px; margin-top: 2px; }
+    #tools select#voice, #tools select#chapterSelect {
+      width: 100%; max-width: none; height: 40px; margin-top: 2px;
+    }
   }
 
   @media (max-width: 640px) {
@@ -451,7 +463,7 @@
     <button class="ic" id="btnOpen" data-label="Open file" title="Open a file" aria-label="Open a file">
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z"/></svg>
     </button>
-    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,.pdf,text/plain,application/pdf">
+    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.markdown,.text,.pdf,.epub,text/plain,application/pdf,application/epub+zip">
   </div>
 
   <div class="tb-mid">
@@ -479,6 +491,7 @@
       <button class="ic" id="btnFollow" data-label="Follow along" title="Follow the spoken word" aria-label="Follow the spoken word" aria-pressed="true">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
       </button>
+      <select id="chapterSelect" class="hidden" title="Chapter" aria-label="Chapter"></select>
       <select id="voice" title="Voice" aria-label="Voice"></select>
     </div>
 
@@ -536,7 +549,7 @@
   <span id="timingMode">estimated timing</span>
 </div>
 
-<div id="drop"><div>Drop a .txt, .md, or .pdf file to read it</div></div>
+<div id="drop"><div>Drop a .txt, .md, .pdf, or .epub file to read it</div></div>
 <div id="toast"></div>
 
 <script>
@@ -617,10 +630,21 @@ function chunkText(text, maxLen = 220) {
       buffer += sentence;
     }
 
-    // A single sentence longer than maxLen gets hard-split on whitespace
-    // so we never hand the engine an oversized utterance.
+    // A single sentence longer than maxLen*1.6 gets forced apart so we
+    // never hand the engine an oversized utterance — real prose sentences
+    // routinely run past 350 characters, so this triggers often enough to
+    // matter, not just on pathological input. Cutting at the last comma,
+    // semicolon, colon, or dash lands the break on a point the writer
+    // already marked as a natural pause; only when a sentence runs long
+    // with no such mark at all does this fall back to the last space, and
+    // then to a bare maxLen cut.
     while (buffer.length > maxLen * 1.6) {
-      let cut = buffer.lastIndexOf(" ", maxLen);
+      let cut = Math.max(
+        buffer.lastIndexOf(", ", maxLen), buffer.lastIndexOf("; ", maxLen),
+        buffer.lastIndexOf(": ", maxLen), buffer.lastIndexOf("— ", maxLen)
+      );
+      if (cut > 0) cut += 1;               // keep the punctuation with the chunk that ends there
+      else cut = buffer.lastIndexOf(" ", maxLen);
       if (cut <= 0) cut = maxLen;
       chunks.push({ text: buffer.slice(0, cut), charOffset: bufferStart });
       bufferStart += cut;
@@ -710,6 +734,18 @@ class Renderer {
     this.spans = spans;
     this.active = -1;
     this._sFrom = this._sTo = null;
+  }
+
+  /** Appended after render/adopt when a document has no words at all —
+   *  an EPUB cover or title page is the common real case. Both of those
+   *  methods already call replaceChildren first, so this only ever shows
+   *  up alongside whatever non-text content (an image, say) that page
+   *  actually had, rather than replacing it. */
+  showEmptyNotice() {
+    const p = document.createElement("p");
+    p.className = "empty-notice";
+    p.textContent = "No readable text on this page — likely a cover, title page, or image.";
+    this.el.appendChild(p);
   }
 
   highlight(index, { scroll = true } = {}) {
@@ -1037,7 +1073,17 @@ function buildFromDom(root) {
 
   function walk(node) {
     if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.nodeValue;
+      // Collapse internal whitespace runs to a single space, the same way
+      // CSS white-space: normal already renders this text visually. Without
+      // this, a source line-wrap inside one paragraph's text node — routine
+      // in hand-formatted EPUBs and multi-line Markdown paragraphs alike —
+      // survives into the spoken string as a literal newline. The chunker
+      // treats any \n as a sentence boundary, so that single stray newline
+      // becomes a chunk split, and each chunk is its own TTS utterance: the
+      // engine adds a full-stop pause at a point with no actual punctuation.
+      // Not trimming the ends, since a single boundary space between two
+      // inline elements (a bold span followed by a word, say) is real.
+      const text = node.nodeValue.replace(/\s+/g, " ");
       if (!text) return;
 
       const base = spoken.length;
@@ -1088,6 +1134,259 @@ function buildFromDom(root) {
 
   walk(root);
   return { text: spoken, tokens, spans };
+}
+
+/* ------------------------------------------------------------------ *
+ * 3d. EPUB -> CHAPTERS
+ *
+ * An EPUB is a zip of real (X)HTML chapter files plus a manifest — much
+ * closer to the Markdown case than to PDF's coordinate soup, so this
+ * reuses the same DOM-in, spans-and-spoken-text-out pipeline as Markdown
+ * (buildFromDom above) rather than inventing a second one. The only
+ * genuinely new work is: unzip, resolve the spine/manifest into a chapter
+ * list, and sanitise real third-party HTML rather than HTML generated
+ * from scratch by this app's own Markdown renderer.
+ *
+ * That sanitisation is the part worth being careful about — this is the
+ * first place in the app that parses HTML written by someone else, rather
+ * than building nodes from scratch or displaying source as literal text.
+ * ------------------------------------------------------------------- */
+
+const JSZIP_URL = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+let jszipPromise = null;
+
+/** Fetched on first EPUB only, so text/Markdown/PDF stay independent of it. */
+function loadJSZip() {
+  if (!jszipPromise) {
+    jszipPromise = new Promise((resolve, reject) => {
+      if (window.JSZip) return resolve(window.JSZip);
+      const script = document.createElement("script");
+      script.src = JSZIP_URL;
+      script.onload = () => resolve(window.JSZip);
+      script.onerror = () => reject(new Error("Failed to fetch JSZip"));
+      document.head.appendChild(script);
+    }).catch((err) => { jszipPromise = null; throw err; });
+  }
+  return jszipPromise;
+}
+
+/** Joins an href against the directory the OPF file lives in, collapsing
+ *  ../ and ./ — EPUB resource paths are always relative to the OPF, not
+ *  to the zip root. */
+function resolveEpubPath(baseDir, href) {
+  const clean = href.split("#")[0];
+  const parts = (baseDir ? baseDir + "/" + clean : clean).split("/");
+  const out = [];
+  for (const part of parts) {
+    if (part === "." || part === "") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return out.join("/");
+}
+
+function dirname(path) {
+  const i = path.lastIndexOf("/");
+  return i < 0 ? "" : path.slice(0, i);
+}
+
+/**
+ * Strips everything a chapter's HTML could use to run code or break out of
+ * the app's own visual language, then rewrites image references to point
+ * at the blob URLs already extracted from the zip.
+ *
+ * Deliberately narrower than the Markdown renderer's inline sanitisation:
+ * that one builds every node itself and only ever needs to constrain link
+ * and image *schemes*. This one is parsing a complete third-party document,
+ * so it also has to remove executable content outright (script, inline
+ * event handlers, stylesheets that could hide content via CSS) and drop
+ * author styling entirely — the book's fonts and colours are not carried
+ * over, the same way a Markdown document's raw HTML is shown as text
+ * rather than rendered. In-book links (footnotes, cross-chapter jumps) are
+ * unwrapped to plain text; there is no in-app navigation target for them.
+ */
+function sanitizeEpubChapter(doc, resources) {
+  const root = document.createElement("div");
+
+  const DROP_TAGS = new Set([
+    "SCRIPT", "STYLE", "LINK", "META", "TITLE", "BASE",
+    "OBJECT", "EMBED", "IFRAME", "FORM", "INPUT", "BUTTON", "SVG",
+  ]);
+
+  function convert(node) {
+    if (node.nodeType === Node.COMMENT_NODE) return null;
+    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.nodeValue);
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    if (DROP_TAGS.has(node.tagName)) return null;
+
+    if (node.tagName === "IMG") {
+      const src = node.getAttribute("src");
+      const resolved = src && resources.get(src.replace(/^\.?\//, ""));
+      if (!resolved) return null;   // no local resource to show it from
+      const img = document.createElement("img");
+      img.src = resolved;
+      img.alt = node.getAttribute("alt") || "";
+      img.loading = "lazy";
+      return img;
+    }
+
+    const tag = node.tagName === "A" ? "a" : node.tagName.toLowerCase();
+    const out = document.createElement(
+      /^(H[1-6]|P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|CODE|EM|I|STRONG|B|BR|HR|SPAN|DIV|A|SUP|SUB)$/.test(node.tagName)
+        ? tag
+        : "span"   // unknown elements keep their text but not their identity
+    );
+
+    if (tag === "a") {
+      const href = node.getAttribute("href") || "";
+      if (SAFE_LINK.test(href)) {
+        out.href = href;
+        out.target = "_blank";
+        out.rel = "noopener noreferrer";
+      } else {
+        // An unresolvable in-book link: keep the text, drop the wrapper.
+        const frag = document.createDocumentFragment();
+        for (const child of node.childNodes) {
+          const converted = convert(child);
+          if (converted) frag.appendChild(converted);
+        }
+        return frag;
+      }
+    }
+
+    for (const child of node.childNodes) {
+      const converted = convert(child);
+      if (converted) out.appendChild(converted);
+    }
+    return out;
+  }
+
+  const body = doc.body || doc.documentElement;
+  for (const child of body.childNodes) {
+    const converted = convert(child);
+    if (converted) root.appendChild(converted);
+  }
+  return root;
+}
+
+/** Parses one chapter's HTML string into a sanitised DOM ready for
+ *  buildFromDom. XHTML first (EPUB's actual format); a small share of
+ *  real-world EPUBs ship HTML that isn't well-formed XML, so a parse
+ *  error falls back to the lenient HTML parser rather than failing the
+ *  whole chapter. */
+function parseEpubChapter(html, resources) {
+  let doc = new DOMParser().parseFromString(html, "application/xhtml+xml");
+  if (doc.querySelector("parsererror")) {
+    doc = new DOMParser().parseFromString(html, "text/html");
+  }
+  return sanitizeEpubChapter(doc, resources);
+}
+
+/** Reads container.xml -> the OPF package document -> manifest + spine,
+ *  extracts every image as a blob URL, and returns the book ready to read
+ *  chapter by chapter. Nothing here renders text yet — parseEpubChapter
+ *  does that lazily per chapter, same as Markdown re-renders from source
+ *  each time rather than caching a mutated tree. */
+async function extractEpub(file) {
+  const JSZip = await loadJSZip();
+  const zip = await JSZip.loadAsync(file);
+
+  const containerXml = await zip.file("META-INF/container.xml").async("string");
+  const containerDoc = new DOMParser().parseFromString(containerXml, "application/xml");
+  const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
+  const opfDir = dirname(opfPath);
+
+  const opfXml = await zip.file(opfPath).async("string");
+  const opfDoc = new DOMParser().parseFromString(opfXml, "application/xml");
+
+  const manifest = new Map();
+  for (const item of opfDoc.querySelectorAll("manifest > item")) {
+    manifest.set(item.getAttribute("id"), {
+      href: resolveEpubPath(opfDir, item.getAttribute("href")),
+      mediaType: item.getAttribute("media-type") || "",
+    });
+  }
+
+  const title =
+    opfDoc.querySelector("metadata > *[*|title], metadata > title")?.textContent?.trim() ||
+    null;
+
+  // Image resources become blob URLs up front; text chapters stay as raw
+  // HTML strings and are only parsed when actually opened.
+  const resources = new Map();
+  for (const { href, mediaType } of manifest.values()) {
+    if (!mediaType.startsWith("image/")) continue;
+    const entry = zip.file(href);
+    if (!entry) continue;
+    const blob = await entry.async("blob");
+    resources.set(href, URL.createObjectURL(new Blob([blob], { type: mediaType })));
+  }
+
+  const spineIds = [...opfDoc.querySelectorAll("spine > itemref")].map((el) =>
+    el.getAttribute("idref")
+  );
+
+  const chapters = [];
+  for (const id of spineIds) {
+    const item = manifest.get(id);
+    if (!item || !/html/.test(item.mediaType)) continue;
+    const entry = zip.file(item.href);
+    if (!entry) continue;
+    chapters.push({ href: item.href, html: await entry.async("string"), title: null });
+  }
+
+  if (!chapters.length) {
+    throw new Error("No readable chapters found in this EPUB.");
+  }
+
+  // Chapter titles come from whichever table of contents the book ships.
+  // EPUB3 books declare a nav document (properties="nav"); EPUB2 books —
+  // still the majority of real-world files, including most Calibre
+  // conversions — use an NCX instead, referenced by the spine's toc
+  // attribute rather than a manifest property. Try both; ordinal titles
+  // cover whatever neither one resolves.
+  const navHref = [...opfDoc.querySelectorAll("manifest > item")]
+    .find((el) => el.getAttribute("properties") === "nav")
+    ?.getAttribute("href");
+
+  if (navHref) {
+    try {
+      const navXml = await zip.file(resolveEpubPath(opfDir, navHref)).async("string");
+      const navDoc = new DOMParser().parseFromString(navXml, "application/xhtml+xml");
+      const navDir = dirname(resolveEpubPath(opfDir, navHref));
+      for (const a of navDoc.querySelectorAll("nav a[href]")) {
+        const target = resolveEpubPath(navDir, a.getAttribute("href"));
+        const chapter = chapters.find((c) => c.href === target);
+        if (chapter && !chapter.title) chapter.title = a.textContent.trim();
+      }
+    } catch (_) {
+      // No usable nav document — the NCX branch or ordinals below cover it.
+    }
+  }
+
+  const tocId = opfDoc.querySelector("spine")?.getAttribute("toc");
+  const ncxHref = tocId && manifest.get(tocId)?.href;
+  if (ncxHref && chapters.some((c) => !c.title)) {
+    try {
+      const ncxXml = await zip.file(ncxHref).async("string");
+      const ncxDoc = new DOMParser().parseFromString(ncxXml, "application/xml");
+      const ncxDir = dirname(ncxHref);
+      for (const point of ncxDoc.querySelectorAll("navPoint")) {
+        const src = point.querySelector(":scope > content")?.getAttribute("src");
+        const label = point.querySelector(":scope > navLabel > text")?.textContent?.trim();
+        if (!src || !label) continue;
+        const target = resolveEpubPath(ncxDir, src);
+        const chapter = chapters.find((c) => c.href === target);
+        if (chapter && !chapter.title) chapter.title = label;
+      }
+    } catch (_) {
+      // No usable NCX either — ordinals below cover the rest.
+    }
+  }
+
+  chapters.forEach((c, i) => { if (!c.title) c.title = `Chapter ${i + 1}`; });
+
+  return { title: title || "Untitled book", resources, chapters };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1442,6 +1741,7 @@ const el = {
   stop: document.getElementById("btnStop"),
   edit: document.getElementById("btnEdit"),
   voice: document.getElementById("voice"),
+  chapterSelect: document.getElementById("chapterSelect"),
   rate: document.getElementById("rate"),
   rateVal: document.getElementById("rateVal"),
   autoscroll: document.getElementById("autoscroll"),
@@ -1520,6 +1820,7 @@ const app = {
     this.sentenceOfToken = sentences.ofToken;
     this.sentenceRanges = sentences.ranges;
 
+    if (this.tokens.length === 0) this.renderer.showEmptyNotice();
     updateProgress(-1);
   },
 
@@ -1850,8 +2151,10 @@ function toast(msg, ms = 2600) {
   toast._t = setTimeout(() => t.classList.remove("on"), ms);
 }
 
-function setSource(label) {
-  document.getElementById("source").textContent = label;
+function setSource(label, fullLabel = label) {
+  const el = document.getElementById("source");
+  el.textContent = label;
+  el.title = fullLabel;   // full text on hover when the visible label is shortened
 }
 
 /* ---------------------------- PDF ---------------------------------- *
@@ -2030,6 +2333,7 @@ async function extractPdf(file, onProgress) {
 /** Holds on to the untouched source so the Clean markup toggle can switch
  *  between raw and cleaned without needing the original file again. */
 function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "" } = {}) {
+  exitEpubMode();
   app.raw = { text: raw, forceMarkdown, cleanable };
   app.engine?.stop();
   app.renderer.clear();
@@ -2039,16 +2343,72 @@ function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "
   toast(`Loaded ${label}${note}`);
 }
 
+/** Hides the chapter picker and drops the parsed book. Called at the start
+ *  of every non-EPUB load path, so switching to a plain file or pasted
+ *  text never leaves a stale chapter list pointing at nothing. */
+function exitEpubMode() {
+  if (!app.epub) return;
+  app.epub = null;
+  el.chapterSelect.classList.add("hidden");
+  el.chapterSelect.replaceChildren();
+}
+
+/** Parses and displays one chapter of the currently loaded EPUB. Chapters
+ *  are re-parsed from their stored HTML each time rather than cached as a
+ *  mutated DOM, the same way Markdown re-renders from source text on every
+ *  load — buildFromDom mutates whatever tree it is given. */
+function openEpubChapter(index) {
+  const book = app.epub;
+  const chapter = book.chapters[index];
+  if (!chapter) return;
+
+  book.currentIndex = index;
+  app.raw = null;   // no raw/rendered toggle for a book chapter
+  app.engine?.stop();
+  app.renderer.clear();
+
+  const root = parseEpubChapter(chapter.html, book.resources);
+  app.load(null, root);
+
+  // The chapter dropdown already shows which chapter this is, and the
+  // book title alongside it made the combined label collide with the
+  // chapter/voice selects on anything narrower than a wide desktop —
+  // short label visible, full context still available on hover.
+  setSource(chapter.title, `${book.title} — ${chapter.title}`);
+  el.chapterSelect.value = String(index);
+}
+
 async function importFile(file) {
   const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+  const isEpub = /\.epub$/i.test(file.name) || file.type === "application/epub+zip";
   const isText = TEXT_EXT.test(file.name) || file.type.startsWith("text/");
 
-  if (!isPdf && !isText) {
-    toast(`Can't read ${file.name} — text, Markdown, and PDF only.`);
+  if (!isPdf && !isEpub && !isText) {
+    toast(`Can't read ${file.name} — text, Markdown, PDF, and EPUB only.`);
     return;
   }
 
   try {
+    if (isEpub) {
+      toast(`Opening ${file.name}…`, 60000);
+      const book = await extractEpub(file);
+      app.epub = { ...book, currentIndex: 0 };
+
+      el.chapterSelect.replaceChildren(
+        ...book.chapters.map((c, i) => {
+          const o = document.createElement("option");
+          o.value = String(i);
+          o.textContent = c.title;
+          return o;
+        })
+      );
+      el.chapterSelect.classList.toggle("hidden", book.chapters.length < 2);
+
+      openEpubChapter(0);
+      toast(`Loaded ${book.title} · ${book.chapters.length} chapter${book.chapters.length === 1 ? "" : "s"}`);
+      return;
+    }
+
     if (isPdf) {
       toast(`Reading ${file.name}…`, 60000);
       const { text, pages } = await extractPdf(file, (n, total) => {
@@ -2075,7 +2435,7 @@ async function importFile(file) {
     const offline = /Failed to fetch|dynamically imported|NetworkError/i.test(err.message || "");
     toast(
       offline
-        ? "Couldn't load the PDF library — PDF support needs a network connection."
+        ? "Couldn't load a required library — this file type needs a network connection."
         : `Couldn't read that file: ${err.message}`
     );
   }
@@ -2087,6 +2447,10 @@ document.getElementById("btnOpen").addEventListener("click", () => fileInput.cli
 fileInput.addEventListener("change", () => {
   if (fileInput.files[0]) importFile(fileInput.files[0]);
   fileInput.value = "";   // allow re-picking the same file
+});
+
+el.chapterSelect.addEventListener("change", () => {
+  openEpubChapter(Number(el.chapterSelect.value));
 });
 
 /* --- clipboard --- */

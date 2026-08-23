@@ -40,7 +40,8 @@ python -m http.server 8000
 | Skip a sentence | The `<<` and `>>` buttons |
 | Scrub | Click anywhere on the progress bar |
 | Change speed | The dial — drag it, scroll it, tap it to cycle, or focus it and use arrow keys (0.75x to 5x) |
-| Open a file | Folder icon, or drag a `.txt` / `.md` / `.pdf` onto the window |
+| Open a file | Folder icon, or drag a `.txt` / `.md` / `.pdf` / `.epub` onto the window |
+| Switch chapters | Chapter dropdown in the toolbar (EPUB only, when a book has more than one chapter) |
 | Paste text | Clipboard icon |
 | Edit text | Pencil icon |
 | Text size | `Aa`, cycles four sizes |
@@ -109,6 +110,20 @@ pages.
 
 Scanned PDFs contain no text layer and will report that they need OCR.
 
+`.epub` uses [JSZip](https://stuk.github.io/jszip/), loaded from a CDN on
+first use only, to read the container/OPF/spine and pull out each chapter's
+HTML plus its images. Unlike PDF, EPUB chapters are already real (X)HTML, so
+they go through the same DOM-to-word-spans pipeline as Markdown rather than
+needing PDF's reflow step. Chapter titles come from the book's table of
+contents — the EPUB3 nav document if present, the EPUB2 NCX otherwise, since
+most real-world EPUB files (including most Calibre conversions) are still
+EPUB2. A chapter picker appears in the toolbar whenever a book has more than
+one chapter. Because a chapter's HTML comes from outside this app, it's
+parsed and rebuilt from scratch rather than trusted: script, style, and
+event-handler content is dropped entirely, links are limited to
+http/https/mailto, and images are shown only when they resolve to a real
+file inside the EPUB's own archive.
+
 ## Browser support
 
 | Browser | Word timing |
@@ -126,7 +141,6 @@ differs per machine.
 Importers are text producers, so new formats slot in without touching the
 tokenizer or the engine.
 
-- [ ] **EPUB** via `epub.js`, with chapter navigation
 - [ ] **URL / article mode** — requires a proxy endpoint; CORS blocks fetching
       arbitrary pages from a static file
 - [ ] **Amazon Polly engine** — precomputed word timings, no estimator needed
