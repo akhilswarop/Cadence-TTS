@@ -84,30 +84,40 @@
 
   .topbar {
     position: sticky; top: 0; z-index: 20;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
+    display: flex; align-items: center; justify-content: space-between;
     gap: 10px;
     padding: 10px calc(16px + var(--safe-right)) 10px calc(16px + var(--safe-left));
     padding-top: calc(10px + var(--safe-top));
     background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
-  .tb-mid { min-width: 0; text-align: center; }
-  /* min-width: 0 is required. Grid items default to min-width: auto, so the
-     voice select refuses to shrink below the width of its longest option
-     name and pushes the whole page into horizontal scroll. */
+  /* Centred on the bar itself, not on the space left between the two
+     button clusters — the desktop icon row is far wider than the single
+     folder icon opposite it, so centring within the leftover middle track
+     visibly drifted toward the light side. Absolute positioning against
+     .topbar (already a positioned element via sticky) is immune to that
+     imbalance; pointer-events: none because the title is a label, not a
+     control, so it never intercepts a click meant for whatever it may
+     visually overlap at very narrow widths. */
+  .tb-mid {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    max-width: min(60vw, 420px);
+    pointer-events: none;
+  }
   .tb-left, .tb-right {
     display: flex; align-items: center; gap: 4px; min-width: 0;
   }
+  /* min-width: 0 is required — flex items default to min-width: auto, so
+     the voice select would refuse to shrink below the width of its longest
+     option name and push the whole page into horizontal scroll. */
   .tb-right { justify-content: flex-end; }
 
   .tb-title {
-    font-size: 14px; font-weight: 600; letter-spacing: -.01em;
+    display: block; width: 100%;
+    font-size: 15px; font-weight: 700; letter-spacing: -.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 46vw; text-align: center;
+    text-align: center;
   }
-  .tb-sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 
   .ic {
     appearance: none; border: 0; background: transparent;
@@ -430,7 +440,7 @@
       border-left: 0; border-right: 0;
       min-height: 70vh;
     }
-    .tb-title { max-width: 38vw; }
+    .tb-mid { max-width: 52vw; }
   }
 </style>
 
@@ -444,7 +454,6 @@
 
   <div class="tb-mid">
     <div class="tb-title" id="source">Cadence TTS</div>
-    <div class="tb-sub" id="wordCount">&nbsp;</div>
   </div>
 
   <div class="tb-right">
@@ -1436,7 +1445,6 @@ const el = {
   clean: document.getElementById("clean"),
   iconPlay: document.getElementById("iconPlay"),
   iconPause: document.getElementById("iconPause"),
-  wordCount: document.getElementById("wordCount"),
   progressFill: document.getElementById("progressFill"),
   timingMode: document.getElementById("timingMode"),
   unsupported: document.getElementById("unsupported"),
@@ -1509,7 +1517,6 @@ const app = {
     this.sentenceOfToken = sentences.ofToken;
     this.sentenceRanges = sentences.ranges;
 
-    el.wordCount.textContent = `${this.tokens.length.toLocaleString()} words`;
     updateProgress(-1);
   },
 
