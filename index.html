@@ -58,6 +58,12 @@
 
   * { box-sizing: border-box; }
 
+  /* Mobile WebKit/Blink paint a solid highlight rectangle over whatever was
+     tapped, on top of any hover/active styling this app already defines
+     for that element — it is not something .ic:hover etc. can override.
+     :focus-visible below still gives keyboard users a real focus ring. */
+  * { -webkit-tap-highlight-color: transparent; }
+
   body {
     margin: 0;
     background: var(--bg);
