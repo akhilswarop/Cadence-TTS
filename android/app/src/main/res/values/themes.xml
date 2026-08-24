@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- No action bar: the web app draws its own top bar. -->
-    <style name="Theme.Cadence" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Wordbeat" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/paper</item>
         <item name="android:statusBarColor">@color/paper</item>
     </style>

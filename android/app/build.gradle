@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.cadence.tts'
+    namespace 'com.wordbeat.tts'
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.cadence.tts"
+        applicationId "com.wordbeat.tts"
         // onRangeStart, which reports word boundaries, landed in API 26.
         // Without it there is no timing track and no word highlighting.
         minSdk 26

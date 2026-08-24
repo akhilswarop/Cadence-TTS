@@ -19,7 +19,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
-        android:theme="@style/Theme.Cadence">
+        android:theme="@style/Theme.Wordbeat">
 
         <activity
             android:name=".MainActivity"

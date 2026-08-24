@@ -1,4 +1,4 @@
-package com.cadence.tts;
+package com.wordbeat.tts;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;

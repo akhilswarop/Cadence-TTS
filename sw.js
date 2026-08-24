@@ -8,14 +8,15 @@
 // network error instead of silently serving a stale cached copy of the
 // library.
 
-// Bumped once, deliberately: this version shipped a real fix for a stale
-// cache that was serving old app code to returning visitors (see below),
-// and the activate handler already deletes every cache except this name —
-// bumping it is what actually clears that existing bad cache out from
-// under someone who has the site installed. There is no other reason to
-// bump this on routine changes; the network-first fetch handler already
-// keeps this entry current on every successful load.
-const CACHE = "cadence-tts-v2";
+// Bumped deliberately, twice now: v2 shipped a real fix for a stale cache
+// that was serving old app code to returning visitors (see below), and v3
+// is the Cadence TTS -> WordBeat rebrand — the activate handler already
+// deletes every cache except this name, so bumping it is what actually
+// clears the previous name's cache out from under someone who has the site
+// installed. There is no other reason to bump this on routine changes; the
+// network-first fetch handler already keeps this entry current on every
+// successful load.
+const CACHE = "wordbeat-v3";
 const SHELL = ["./index.html", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (event) => {

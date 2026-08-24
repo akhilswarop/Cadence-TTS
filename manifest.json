@@ -1,6 +1,6 @@
 {
-  "name": "Cadence TTS",
-  "short_name": "Cadence",
+  "name": "WordBeat",
+  "short_name": "WordBeat",
   "description": "A text-to-speech reader that highlights each word as it's spoken.",
   "start_url": "./index.html",
   "scope": "./",

@@ -71,7 +71,7 @@ Write-Host "== Linking resources + generating R.java (aapt2 link) ==" -Foregroun
 # set. So the attribute is injected into a throwaway copy instead.
 $manifestDirect = "$out\AndroidManifest.direct.xml"
 (Get-Content $manifest -Raw) `
-    -replace '<manifest\s+xmlns:android="([^"]+)">', '<manifest xmlns:android="$1" package="com.cadence.tts">' |
+    -replace '<manifest\s+xmlns:android="([^"]+)">', '<manifest xmlns:android="$1" package="com.wordbeat.tts">' |
     Set-Content -Encoding UTF8 $manifestDirect
 
 $flatFiles = Get-ChildItem "$out\compiled-res\*.flat" | ForEach-Object { $_.FullName }

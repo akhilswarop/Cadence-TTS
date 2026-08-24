@@ -1,4 +1,4 @@
-# Cadence TTS
+# WordBeat
 
 A text-to-speech reader that highlights each word as it's spoken, with a soft
 band marking the sentence around it.
@@ -20,8 +20,8 @@ see the note in [Releasing](#releasing) below.
 ## Quick start
 
 ```bash
-git clone https://github.com/akhilswarop/Cadence-TTS.git
-cd Cadence-TTS
+git clone https://github.com/akhilswarop/WordBeat.git
+cd WordBeat
 start index.html      # Windows;  macOS: open index.html
 ```
 
@@ -191,7 +191,7 @@ the browser version.
 [Android CI](.github/workflows/android.yml) workflow manually from the
 Actions tab. GitHub's runner has a real JDK and Gradle install, so it needs
 none of the workarounds below. The signed-with-debug-key APK is attached to
-the run as the `cadence-tts-debug` artifact.
+the run as the `wordbeat-debug` artifact.
 
 **Locally, with Android Studio:** open `android/` and let Studio generate the
 Gradle wrapper on sync, then

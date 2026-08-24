@@ -49,6 +49,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cadence-tts-debug
+          name: wordbeat-debug
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
