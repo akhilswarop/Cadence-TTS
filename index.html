@@ -858,6 +858,12 @@ const INLINE_RULES = [
   { re: /!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => imageNode(m[1], m[2]) },
   { re: /\[([^\]]+)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => linkNode(m[1], m[2]) },
   { re: /<((?:https?|mailto):[^>\s]+)>/, make: (m) => linkNode(m[1], m[1]) },
+  // Standard autolink syntax for an email needs no explicit "mailto:" —
+  // <test@example.com> is itself the whole address, with the scheme only
+  // implied — but that scheme still has to land in the actual href for it
+  // to work as a link at all, so it's added here rather than left for the
+  // browser to infer.
+  { re: /<([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>/, make: (m) => linkNode(m[1], "mailto:" + m[1]) },
   {
     re: /(\*\*\*|___)(\S(?:[\s\S]*?\S)?)\1/,
     make: (m) => {
@@ -959,9 +965,16 @@ function markdownToDom(src) {
       continue;
     }
 
-    const isRow = (s) => /^[ \t]*\|.*\|[ \t]*$/.test(s);
-    if (isRow(line) && next &&
-        /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(next)) {
+    // A leading and trailing pipe is optional in GFM — "Name | Age" is as
+    // valid a header row as "| Name | Age |" — so requiring both, as this
+    // used to, missed every table written in the no-edge-pipes style.
+    const isRow = (s) => s.includes("|");
+    const isSeparator = (s) =>
+      /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(s);
+    const isTableStart = (idx) =>
+      isRow(lines[idx]) && lines[idx + 1] !== undefined && isSeparator(lines[idx + 1]);
+
+    if (isTableStart(i)) {
       const cells = (s) => s.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
       const table = document.createElement("table");
       const head = document.createElement("tr");
@@ -985,17 +998,29 @@ function markdownToDom(src) {
 
     const item = line.match(LIST_ITEM);
     if (item) {
+      // A sibling item must sit at this same indent; anything indented
+      // deeper — a nested list, or just a continuation line — belongs to
+      // this item's own content instead of ending it. Without tracking
+      // indent, an indented sub-list looked like "a list of the other kind"
+      // and fractured the parent list around it: a numbered list containing
+      // a nested bullet sub-list used to split into two separate <ol>s with
+      // an unrelated <ul> sandwiched between them, and since a fresh <ol>
+      // always starts counting at 1, the second fragment's numbering was
+      // simply wrong.
+      const indent = item[1].length;
       const ordered = /\d/.test(item[2]);
       const list = document.createElement(ordered ? "ol" : "ul");
 
       while (i < lines.length) {
         const m = lines[i].match(LIST_ITEM);
-        if (!m || /\d/.test(m[2]) !== ordered) break;
+        if (!m || m[1].length !== indent || /\d/.test(m[2]) !== ordered) break;
 
         const itemLines = [m[3]];
         i++;
-        while (i < lines.length && !blank(lines[i]) && !LIST_ITEM.test(lines[i])) {
-          itemLines.push(lines[i].replace(/^ {0,4}/, ""));
+        while (i < lines.length && !blank(lines[i])) {
+          const cm = lines[i].match(LIST_ITEM);
+          if (cm && cm[1].length <= indent) break;
+          itemLines.push(lines[i]);
           i++;
         }
 
@@ -1012,13 +1037,30 @@ function markdownToDom(src) {
           content = task[2];
         }
 
-        inlineInto(li, content);
+        // Recursed rather than inlined as one run of text, so a nested list
+        // or a second wrapped paragraph inside this item goes through the
+        // same block-level rules as the top level instead of being
+        // flattened into it. The item's own label always starts as a <p> —
+        // that first paragraph is unwrapped either way, so a marker (a
+        // checkbox, say) still sits inline with its label instead of being
+        // pushed onto its own line by a block-level wrapper; only further
+        // content after it (a nested list) stays as real block children.
+        const body = markdownToDom(content);
+        if (body.firstElementChild && body.firstElementChild.tagName === "P") {
+          const label = body.firstElementChild;
+          while (label.firstChild) li.appendChild(label.firstChild);
+          label.remove();
+        }
+        while (body.firstChild) li.appendChild(body.firstChild);
         list.appendChild(li);
 
         // A blank line between items is still one list, so look past it.
         let peek = i;
         while (peek < lines.length && blank(lines[peek])) peek++;
-        if (peek < lines.length && LIST_ITEM.test(lines[peek])) { i = peek; continue; }
+        if (peek < lines.length) {
+          const pm = lines[peek].match(LIST_ITEM);
+          if (pm && pm[1].length === indent) { i = peek; continue; }
+        }
         break;
       }
 
@@ -1028,7 +1070,8 @@ function markdownToDom(src) {
 
     const para = [];
     while (i < lines.length && !blank(lines[i]) &&
-           !/^ {0,3}(#{1,6}\s|>|```|~~~)/.test(lines[i]) && !LIST_ITEM.test(lines[i])) {
+           !/^ {0,3}(#{1,6}\s|>|```|~~~)/.test(lines[i]) && !LIST_ITEM.test(lines[i]) &&
+           !isTableStart(i)) {
       para.push(lines[i]);
       i++;
     }
