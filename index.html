@@ -804,282 +804,53 @@ class Renderer {
 /* ------------------------------------------------------------------ *
  * 3b. MARKDOWN -> DOM
  *
- * Renders Markdown as real elements instead of flattening it to text, so
- * headings, emphasis, lists, tables and images survive into the reader.
- *
- * Nodes are built with createElement and textContent throughout, never
- * innerHTML, so a document cannot inject markup or script. Raw HTML in the
- * source is therefore shown as literal text rather than executed, and link
- * and image URLs are restricted to schemes that cannot run code.
+ * Parsing is delegated to marked (CDN, lazy-loaded on first use — same
+ * pattern as pdf.js and JSZip below) rather than hand-rolled: a document's
+ * worth of CommonMark/GFM edge cases (list nesting, table styles, autolink
+ * forms, escaping) is exactly the kind of thing a widely-used parser has
+ * already been tested against far more thoroughly than one project's own
+ * stress tests can manage. marked returns an HTML string; that string is
+ * parsed into a DOM and run through the same sanitiser the EPUB importer
+ * uses (sanitizeHtmlDoc, in the EPUB section below) rather than trusted via
+ * innerHTML, since it's third-party output the same way a chapter file is.
  * ------------------------------------------------------------------ */
 
 const SAFE_LINK = /^(?:https?:|mailto:)/i;
 const SAFE_IMAGE = /^(?:https?:|data:image\/)/i;
 
-function elText(tag, text) {
-  const e = document.createElement(tag);
-  e.textContent = text;
-  return e;
-}
+// A leading and trailing pipe is optional in GFM — "Name | Age" is as valid
+// a header row as "| Name | Age |". Used only by the Markdown-detection
+// heuristic near stripMarkdown now that marked handles the actual parsing;
+// still needed there because that heuristic runs before deciding whether
+// it's worth loading marked at all.
+const isTableRow = (s) => s.includes("|");
+const isTableSeparator = (s) =>
+  /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(s);
 
-function inlineInto(parent, text) {
-  for (const node of inlineToNodes(text)) parent.appendChild(node);
-  return parent;
-}
+const MARKED_URL = "https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js";
+let markedPromise = null;
 
-function wrapInline(tag, inner) {
-  return inlineInto(document.createElement(tag), inner);
-}
-
-function linkNode(label, href) {
-  const a = document.createElement("a");
-  if (SAFE_LINK.test(href)) {
-    a.href = href;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
+/** Fetched on first Markdown document only, so plain text stays independent
+ *  of it — mirrors loadJSZip below. */
+function loadMarked() {
+  if (!markedPromise) {
+    markedPromise = new Promise((resolve, reject) => {
+      if (window.marked) return resolve(window.marked);
+      const script = document.createElement("script");
+      script.src = MARKED_URL;
+      script.onload = () => resolve(window.marked);
+      script.onerror = () => reject(new Error("Failed to fetch marked"));
+      document.head.appendChild(script);
+    }).catch((err) => { markedPromise = null; throw err; });
   }
-  return inlineInto(a, label);
+  return markedPromise;
 }
 
-function imageNode(alt, src) {
-  if (!SAFE_IMAGE.test(src)) return document.createTextNode(alt);
-  const img = document.createElement("img");
-  img.src = src;
-  img.alt = alt;
-  img.loading = "lazy";
-  return img;
-}
-
-/* Ordered by precedence. Each rule matches once; the scanner below picks
-   whichever rule matches earliest in the remaining text. */
-const INLINE_RULES = [
-  { re: /\\([\\`*_{}\[\]()#+\-.!>~|])/, make: (m) => document.createTextNode(m[1]) },
-  { re: /(`+)([\s\S]*?)\1/, make: (m) => elText("code", m[2].trim()) },
-  { re: /!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => imageNode(m[1], m[2]) },
-  { re: /\[([^\]]+)\]\(\s*([^)\s]+)[^)]*\)/, make: (m) => linkNode(m[1], m[2]) },
-  { re: /<((?:https?|mailto):[^>\s]+)>/, make: (m) => linkNode(m[1], m[1]) },
-  // Standard autolink syntax for an email needs no explicit "mailto:" —
-  // <test@example.com> is itself the whole address, with the scheme only
-  // implied — but that scheme still has to land in the actual href for it
-  // to work as a link at all, so it's added here rather than left for the
-  // browser to infer.
-  { re: /<([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>/, make: (m) => linkNode(m[1], "mailto:" + m[1]) },
-  {
-    re: /(\*\*\*|___)(\S(?:[\s\S]*?\S)?)\1/,
-    make: (m) => {
-      const strong = document.createElement("strong");
-      strong.appendChild(wrapInline("em", m[2]));
-      return strong;
-    },
-  },
-  { re: /(\*\*|__)(\S(?:[\s\S]*?\S)?)\1/, make: (m) => wrapInline("strong", m[2]) },
-  { re: /~~([\s\S]+?)~~/, make: (m) => wrapInline("del", m[1]) },
-  { re: /\*(\S(?:[^*\n]*?\S)?)\*/, make: (m) => wrapInline("em", m[1]) },
-  {
-    // Underscore emphasis only at word boundaries, so snake_case survives.
-    re: /(^|[^A-Za-z0-9_])_(\S(?:[^_\n]*?\S)?)_(?![A-Za-z0-9])/,
-    make: (m) => {
-      const frag = document.createDocumentFragment();
-      if (m[1]) frag.appendChild(document.createTextNode(m[1]));
-      frag.appendChild(wrapInline("em", m[2]));
-      return frag;
-    },
-  },
-];
-
-function inlineToNodes(text) {
-  const out = [];
-  let rest = String(text);
-  let guard = 0;
-
-  while (rest && guard++ < 10000) {
-    let best = null;
-    for (const rule of INLINE_RULES) {
-      const m = rule.re.exec(rest);
-      if (m && (!best || m.index < best.m.index)) best = { m, rule };
-    }
-    if (!best) break;
-
-    if (best.m.index > 0) out.push(document.createTextNode(rest.slice(0, best.m.index)));
-    out.push(best.rule.make(best.m));
-    rest = rest.slice(best.m.index + best.m[0].length);
-  }
-
-  if (rest) out.push(document.createTextNode(rest));
-  return out;
-}
-
-const LIST_ITEM = /^([ \t]*)([-*+]|\d+[.)])[ \t]+(.*)$/;
-
-function markdownToDom(src) {
-  const root = document.createElement("div");
-  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
-  const blank = (s) => !s || !s.trim();
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    if (blank(line)) { i++; continue; }
-
-    const fence = line.match(/^[ \t]*(```|~~~)/);
-    if (fence) {
-      const marker = fence[1];
-      const body = [];
-      i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith(marker)) body.push(lines[i++]);
-      i++;                                   // step past the closing fence
-      const pre = document.createElement("pre");
-      pre.appendChild(elText("code", body.join("\n")));
-      root.appendChild(pre);
-      continue;
-    }
-
-    if (/^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(line)) {
-      root.appendChild(document.createElement("hr"));
-      i++; continue;
-    }
-
-    const atx = line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
-    if (atx) {
-      root.appendChild(wrapInline("h" + atx[1].length, atx[2]));
-      i++; continue;
-    }
-
-    const next = lines[i + 1];
-    if (next && /^ {0,3}=+\s*$/.test(next)) {
-      root.appendChild(wrapInline("h1", line.trim())); i += 2; continue;
-    }
-    if (next && /^ {0,3}-+\s*$/.test(next) && !LIST_ITEM.test(line)) {
-      root.appendChild(wrapInline("h2", line.trim())); i += 2; continue;
-    }
-
-    if (/^ {0,3}>/.test(line)) {
-      const body = [];
-      while (i < lines.length && /^ {0,3}>/.test(lines[i])) {
-        body.push(lines[i].replace(/^ {0,3}> ?/, ""));
-        i++;
-      }
-      const quote = document.createElement("blockquote");
-      quote.appendChild(markdownToDom(body.join("\n")));
-      root.appendChild(quote);
-      continue;
-    }
-
-    // A leading and trailing pipe is optional in GFM — "Name | Age" is as
-    // valid a header row as "| Name | Age |" — so requiring both, as this
-    // used to, missed every table written in the no-edge-pipes style.
-    const isRow = (s) => s.includes("|");
-    const isSeparator = (s) =>
-      /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/.test(s);
-    const isTableStart = (idx) =>
-      isRow(lines[idx]) && lines[idx + 1] !== undefined && isSeparator(lines[idx + 1]);
-
-    if (isTableStart(i)) {
-      const cells = (s) => s.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-      const table = document.createElement("table");
-      const head = document.createElement("tr");
-      for (const c of cells(line)) head.appendChild(wrapInline("th", c));
-      const thead = document.createElement("thead");
-      thead.appendChild(head);
-      table.appendChild(thead);
-
-      i += 2;
-      const tbody = document.createElement("tbody");
-      while (i < lines.length && isRow(lines[i])) {
-        const tr = document.createElement("tr");
-        for (const c of cells(lines[i])) tr.appendChild(wrapInline("td", c));
-        tbody.appendChild(tr);
-        i++;
-      }
-      table.appendChild(tbody);
-      root.appendChild(table);
-      continue;
-    }
-
-    const item = line.match(LIST_ITEM);
-    if (item) {
-      // A sibling item must sit at this same indent; anything indented
-      // deeper — a nested list, or just a continuation line — belongs to
-      // this item's own content instead of ending it. Without tracking
-      // indent, an indented sub-list looked like "a list of the other kind"
-      // and fractured the parent list around it: a numbered list containing
-      // a nested bullet sub-list used to split into two separate <ol>s with
-      // an unrelated <ul> sandwiched between them, and since a fresh <ol>
-      // always starts counting at 1, the second fragment's numbering was
-      // simply wrong.
-      const indent = item[1].length;
-      const ordered = /\d/.test(item[2]);
-      const list = document.createElement(ordered ? "ol" : "ul");
-
-      while (i < lines.length) {
-        const m = lines[i].match(LIST_ITEM);
-        if (!m || m[1].length !== indent || /\d/.test(m[2]) !== ordered) break;
-
-        const itemLines = [m[3]];
-        i++;
-        while (i < lines.length && !blank(lines[i])) {
-          const cm = lines[i].match(LIST_ITEM);
-          if (cm && cm[1].length <= indent) break;
-          itemLines.push(lines[i]);
-          i++;
-        }
-
-        const li = document.createElement("li");
-        let content = itemLines.join("\n");
-
-        const task = content.match(/^\[([ xX])\][ \t]+([\s\S]*)$/);
-        if (task) {
-          const box = document.createElement("input");
-          box.type = "checkbox";
-          box.disabled = true;
-          box.checked = /[xX]/.test(task[1]);
-          li.appendChild(box);
-          content = task[2];
-        }
-
-        // Recursed rather than inlined as one run of text, so a nested list
-        // or a second wrapped paragraph inside this item goes through the
-        // same block-level rules as the top level instead of being
-        // flattened into it. The item's own label always starts as a <p> —
-        // that first paragraph is unwrapped either way, so a marker (a
-        // checkbox, say) still sits inline with its label instead of being
-        // pushed onto its own line by a block-level wrapper; only further
-        // content after it (a nested list) stays as real block children.
-        const body = markdownToDom(content);
-        if (body.firstElementChild && body.firstElementChild.tagName === "P") {
-          const label = body.firstElementChild;
-          while (label.firstChild) li.appendChild(label.firstChild);
-          label.remove();
-        }
-        while (body.firstChild) li.appendChild(body.firstChild);
-        list.appendChild(li);
-
-        // A blank line between items is still one list, so look past it.
-        let peek = i;
-        while (peek < lines.length && blank(lines[peek])) peek++;
-        if (peek < lines.length) {
-          const pm = lines[peek].match(LIST_ITEM);
-          if (pm && pm[1].length === indent) { i = peek; continue; }
-        }
-        break;
-      }
-
-      root.appendChild(list);
-      continue;
-    }
-
-    const para = [];
-    while (i < lines.length && !blank(lines[i]) &&
-           !/^ {0,3}(#{1,6}\s|>|```|~~~)/.test(lines[i]) && !LIST_ITEM.test(lines[i]) &&
-           !isTableStart(i)) {
-      para.push(lines[i]);
-      i++;
-    }
-    if (para.length) root.appendChild(wrapInline("p", para.join("\n")));
-    else i++;
-  }
-
-  return root;
+async function markdownToDom(src) {
+  const marked = await loadMarked();
+  const html = marked.parse(String(src), { gfm: true, breaks: false });
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return sanitizeHtmlDoc(doc, (imgSrc) => (SAFE_IMAGE.test(imgSrc) ? imgSrc : null));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1259,26 +1030,28 @@ function dirname(path) {
 }
 
 /**
- * Strips everything a chapter's HTML could use to run code or break out of
- * the app's own visual language, then rewrites image references to point
- * at the blob URLs already extracted from the zip.
+ * Strips everything a document's HTML could use to run code or break out of
+ * the app's own visual language, then rewrites image references through
+ * resolveImage — the one part that differs between callers: an EPUB image
+ * resolves against the archive's own extracted resources, while a Markdown
+ * image is just checked against the same URL-scheme allowlist as a link.
  *
- * Deliberately narrower than the Markdown renderer's inline sanitisation:
- * that one builds every node itself and only ever needs to constrain link
- * and image *schemes*. This one is parsing a complete third-party document,
- * so it also has to remove executable content outright (script, inline
- * event handlers, stylesheets that could hide content via CSS) and drop
- * author styling entirely — the book's fonts and colours are not carried
- * over, the same way a Markdown document's raw HTML is shown as text
- * rather than rendered. In-book links (footnotes, cross-chapter jumps) are
- * unwrapped to plain text; there is no in-app navigation target for them.
+ * This is the first place in the app that parses HTML written by someone
+ * (or something) else, rather than building nodes from scratch — used for
+ * both EPUB chapters and, since Markdown rendering moved to marked, its
+ * output too. So besides constraining link and image *schemes*, it also
+ * removes executable content outright (script, inline event handlers,
+ * stylesheets that could hide content via CSS) and drops author styling
+ * entirely — colours and fonts are never carried over. Links that don't
+ * resolve to anything the app can act on (an EPUB's in-book footnote jump,
+ * say) are unwrapped to plain text rather than kept as a dead link.
  */
-function sanitizeEpubChapter(doc, resources) {
+function sanitizeHtmlDoc(doc, resolveImage) {
   const root = document.createElement("div");
 
   const DROP_TAGS = new Set([
     "SCRIPT", "STYLE", "LINK", "META", "TITLE", "BASE",
-    "OBJECT", "EMBED", "IFRAME", "FORM", "INPUT", "BUTTON", "SVG",
+    "OBJECT", "EMBED", "IFRAME", "FORM", "BUTTON", "SVG",
   ]);
 
   function convert(node) {
@@ -1300,8 +1073,8 @@ function sanitizeEpubChapter(doc, resources) {
 
     if (tagName === "IMG") {
       const src = node.getAttribute("src");
-      const resolved = src && resources.get(src.replace(/^\.?\//, ""));
-      if (!resolved) return null;   // no local resource to show it from
+      const resolved = src && resolveImage(src);
+      if (!resolved) return null;   // no safe or resolvable source to show it from
       const img = document.createElement("img");
       img.src = resolved;
       img.alt = node.getAttribute("alt") || "";
@@ -1309,9 +1082,22 @@ function sanitizeEpubChapter(doc, resources) {
       return img;
     }
 
+    // The only INPUT this ever allows through is a disabled checkbox —
+    // exactly the shape marked emits for a GFM task list item. Anything
+    // else (text fields, buttons-as-inputs) is dropped like the rest of a
+    // <form>'s controls; there is nothing in this app for them to submit to.
+    if (tagName === "INPUT") {
+      if ((node.getAttribute("type") || "").toLowerCase() !== "checkbox") return null;
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.disabled = true;
+      box.checked = node.hasAttribute("checked");
+      return box;
+    }
+
     const tag = tagName === "A" ? "a" : tagName.toLowerCase();
     const out = document.createElement(
-      /^(H[1-6]|P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|CODE|EM|I|STRONG|B|BR|HR|SPAN|DIV|A|SUP|SUB)$/.test(tagName)
+      /^(H[1-6]|P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|CODE|EM|I|STRONG|B|DEL|S|BR|HR|SPAN|DIV|A|SUP|SUB)$/.test(tagName)
         ? tag
         : "span"   // unknown elements keep their text but not their identity
     );
@@ -1323,7 +1109,7 @@ function sanitizeEpubChapter(doc, resources) {
         out.target = "_blank";
         out.rel = "noopener noreferrer";
       } else {
-        // An unresolvable in-book link: keep the text, drop the wrapper.
+        // An unresolvable link: keep the text, drop the wrapper.
         const frag = document.createDocumentFragment();
         for (const child of node.childNodes) {
           const converted = convert(child);
@@ -1346,6 +1132,10 @@ function sanitizeEpubChapter(doc, resources) {
     if (converted) root.appendChild(converted);
   }
   return root;
+}
+
+function sanitizeEpubChapter(doc, resources) {
+  return sanitizeHtmlDoc(doc, (src) => resources.get(src.replace(/^\.?\//, "")));
 }
 
 /** Parses one chapter's HTML string into a sanitised DOM ready for
@@ -2103,11 +1893,11 @@ el.edit.addEventListener("click", () => {
   }
 });
 
-el.clean.addEventListener("change", () => {
+el.clean.addEventListener("change", async () => {
   if (!app.raw) return;
   app.engine?.stop();
   app.renderer.clear();
-  const doc = prepareDoc(app.raw.text, app.raw);
+  const doc = await prepareDoc(app.raw.text, app.raw);
   app.load(doc.text, doc.tree);
   toast(el.clean.checked ? "Formatting rendered" : "Showing raw source");
 });
@@ -2201,20 +1991,32 @@ const MARKDOWN_SIGNALS = [
   /(^|\n)[ \t]*(```|~~~)/,
   /\*\*\S[\s\S]*?\S\*\*/,
   /^\s{0,3}>[ \t]+\S/m,
-  /^[ \t]*\|.+\|[ \t]*$/m,
 ];
 
 function looksLikeMarkdown(s) {
-  return MARKDOWN_SIGNALS.some((re) => re.test(s));
+  if (MARKDOWN_SIGNALS.some((re) => re.test(s))) return true;
+  // A table needs its own two-line check — a header row plus its separator
+  // — rather than a single-line regex, now that a row's leading/trailing
+  // pipes are optional (see isTableRow/isTableSeparator).
+  const lines = s.split("\n");
+  return lines.some((l, i) => isTableRow(l) && lines[i + 1] !== undefined && isTableSeparator(lines[i + 1]));
 }
 
 /** Every input path funnels through here, so pasted and typed Markdown is
- *  cleaned exactly like a dropped .md file. */
-function prepareDoc(raw, { forceMarkdown = false, cleanable = true } = {}) {
+ *  cleaned exactly like a dropped .md file. Async because rendering now
+ *  means loading marked on first use — same lazy-CDN shape as PDF/EPUB, so
+ *  plain text and typed prose never pay for a library they don't need. */
+async function prepareDoc(raw, { forceMarkdown = false, cleanable = true } = {}) {
   if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
   if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
 
-  const tree = markdownToDom(raw);
+  let tree;
+  try {
+    tree = await markdownToDom(raw);
+  } catch (err) {
+    toast("Couldn't load the Markdown renderer — this needs a network connection. Showing raw text.");
+    return { text: raw, tree: null };
+  }
   if (tree.childNodes.length) return { text: null, tree };
 
   // Nothing parsed into blocks. Fall back to stripping the syntax so the
@@ -2412,12 +2214,12 @@ async function extractPdf(file, onProgress) {
 
 /** Holds on to the untouched source so the Clean markup toggle can switch
  *  between raw and cleaned without needing the original file again. */
-function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "" } = {}) {
+async function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "" } = {}) {
   exitEpubMode();
   app.raw = { text: raw, forceMarkdown, cleanable };
   app.engine?.stop();
   app.renderer.clear();
-  const doc = prepareDoc(raw, { forceMarkdown, cleanable });
+  const doc = await prepareDoc(raw, { forceMarkdown, cleanable });
   app.load(doc.text, doc.tree);
   setSource(label);
   toast(`Loaded ${label}${note}`);

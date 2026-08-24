@@ -98,11 +98,20 @@ producer — the UI never changes.
 
 ## Formats
 
-`.txt` and `.md` are read directly. Markdown syntax is stripped so headings,
-tables, and link URLs aren't read aloud as symbols.
+`.txt` is read directly, no network needed.
+
+`.md` is rendered with [marked](https://marked.js.org/), loaded from a CDN on
+first use, rather than a hand-rolled parser — CommonMark and GFM (tables,
+task lists, nested lists, autolinks, strikethrough) have enough edge cases
+that a library already tested against them beats re-discovering those edge
+cases one bug report at a time. Its HTML output is parsed into a DOM and run
+through the same sanitiser as an EPUB chapter (never trusted via innerHTML)
+before word-spans are threaded through it for highlighting, so headings,
+emphasis, lists, tables, and images survive into the reader instead of being
+flattened to text.
 
 `.pdf` uses [pdf.js](https://mozilla.github.io/pdf.js/), loaded from a CDN on
-first use only — text and Markdown stay fully offline. PDFs store glyphs at
+first use only. PDFs store glyphs at
 coordinates rather than sentences, so fragments are reassembled into lines by
 baseline, lines into paragraphs by vertical gap, hyphenated words rejoined, and
 running heads, footers, and page numbers dropped by detecting repetition across
@@ -212,11 +221,11 @@ scale past what this single-module app currently is — reach for the CI
 workflow or a real Gradle install once either is available. See the comment
 at the top of the script for the full explanation.
 
-Note that PDF import
-fetches pdf.js from a CDN, so a PDF opened in the app needs a network
-connection; text and Markdown work fully offline. If you care about offline
-PDFs — or about the fact that a CDN script shares the page with a JavaScript
-bridge — vendor pdf.js into the assets instead.
+Note that PDF and Markdown both fetch a library from a CDN on first use
+(pdf.js, marked), so opening either needs a network connection; only plain
+text works fully offline. If you care about offline PDFs or Markdown — or
+about the fact that a CDN script shares the page with a JavaScript bridge —
+vendor the relevant library into the assets instead.
 
 ## Releasing
 
