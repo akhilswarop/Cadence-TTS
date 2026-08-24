@@ -2539,6 +2539,16 @@ window.addEventListener("paste", (e) => {
 });
 
 document.getElementById("btnPaste").addEventListener("click", async () => {
+  // The Android wrapper loads this page over file://, where the web
+  // Clipboard API has no prompt UI to appear in at all — WebView isn't
+  // Chrome, it never asks, it just rejects. readClipboardText() bridges to
+  // Android's own ClipboardManager instead, sidestepping the web
+  // permission entirely rather than falling back to a Ctrl+V that a touch
+  // keyboard doesn't have.
+  if (window.AndroidTTS?.readClipboardText) {
+    handlePastedText(window.AndroidTTS.readClipboardText());
+    return;
+  }
   // file:// has no origin to attach a permission to, so Chrome/Edge/Firefox
   // never show the clipboard-read prompt there — readText() would just
   // reject every time, for every user, forever. Skip straight to the

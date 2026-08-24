@@ -1,5 +1,7 @@
 package com.cadence.tts;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Bundle;
 import android.speech.tts.TextToSpeech;
@@ -31,6 +33,7 @@ import java.util.Set;
 public class TtsBridge {
 
     private final WebView web;
+    private final Context context;
     // Not final: the init callback below reads this field from inside the
     // same expression that assigns it. The callback only ever fires
     // asynchronously after the constructor returns, so tts is always set by
@@ -41,6 +44,7 @@ public class TtsBridge {
 
     public TtsBridge(WebView web, Context context) {
         this.web = web;
+        this.context = context;
         this.tts = new TextToSpeech(context, status -> {
             ready = status == TextToSpeech.SUCCESS;
             if (ready) {
@@ -153,6 +157,29 @@ public class TtsBridge {
         } catch (Exception ignored) {
         }
         return false;
+    }
+
+    /**
+     * A plain WebView never shows the clipboard-read permission prompt
+     * Chrome does — there is no infobar UI for it to appear in — so
+     * navigator.clipboard.readText() just rejects unconditionally here,
+     * with no OS-level fallback like a desktop Ctrl+V. Reading through
+     * Android's own ClipboardManager sidesteps the web permission entirely,
+     * the same fix as speech synthesis: bridge to the platform API instead
+     * of waiting on a web capability WebView doesn't implement.
+     */
+    @JavascriptInterface
+    public String readClipboardText() {
+        try {
+            ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) return "";
+            ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence text = clip.getItemAt(0).coerceToText(context);
+            return text == null ? "" : text.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     void shutdown() {
