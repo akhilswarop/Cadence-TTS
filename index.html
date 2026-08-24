@@ -2141,8 +2141,15 @@ function stripMarkdown(src) {
   );
 }
 
-/* Two independent signals before assuming Markdown, so ordinary prose that
-   happens to contain an asterisk isn't quietly rewritten. */
+/* Every pattern here is already a well-formed construct — a matched bold
+   pair, a list marker plus its content, a fenced block — not a single
+   stray character, so one match is enough evidence on its own. This used
+   to require two independent signals, on the theory that ordinary prose
+   containing an asterisk shouldn't be quietly rewritten. In practice that
+   let through exactly the short, single-signal replies a chat assistant
+   commonly pastes in — a paragraph or two with only **bold** terms and no
+   headings or lists — which then displayed and were read aloud with their
+   literal markdown syntax intact. */
 const MARKDOWN_SIGNALS = [
   /^\s{0,3}#{1,6}\s+\S/m,
   /^\s{0,3}[-*+][ \t]+\S/m,
@@ -2155,7 +2162,7 @@ const MARKDOWN_SIGNALS = [
 ];
 
 function looksLikeMarkdown(s) {
-  return MARKDOWN_SIGNALS.filter((re) => re.test(s)).length >= 2;
+  return MARKDOWN_SIGNALS.some((re) => re.test(s));
 }
 
 /** Every input path funnels through here, so pasted and typed Markdown is
@@ -2483,22 +2490,74 @@ el.chapterSelect.addEventListener("change", () => {
   openEpubChapter(Number(el.chapterSelect.value));
 });
 
-/* --- clipboard --- */
+/* --- clipboard ---
+ * navigator.clipboard.readText() is gated behind a permission that browsers
+ * grant inconsistently — Chrome prompts and remembers the answer, Firefox
+ * and Safari refuse it outright, and an installed PWA can land in either
+ * camp depending on how it was launched. When it's refused there used to be
+ * no way forward: a toast and a dead end.
+ *
+ * A real user-triggered paste (Ctrl+V, or the OS's Paste menu item) needs
+ * no such permission — it's the browser delivering an actual "paste" DOM
+ * event, not a script asking for standing clipboard access. That's the
+ * fallback below, via a hidden field dedicated to catching it. Because it
+ * needs no permission at all, it's also wired up globally so Ctrl+V works
+ * anywhere on the page, not just after clicking the toolbar button.
+ */
+const pasteCatcher = document.createElement("textarea");
+pasteCatcher.setAttribute("aria-hidden", "true");
+pasteCatcher.tabIndex = -1;
+Object.assign(pasteCatcher.style, {
+  position: "fixed", top: "0", left: "0", width: "1px", height: "1px",
+  opacity: "0", pointerEvents: "none",
+});
+document.body.appendChild(pasteCatcher);
+
+function handlePastedText(text) {
+  if (!text || !text.trim()) { toast("Clipboard is empty."); return; }
+  loadRaw(text, "pasted text", {
+    note: ` · ${text.length.toLocaleString()} characters`,
+  });
+}
+
+pasteCatcher.addEventListener("paste", (e) => {
+  e.preventDefault();
+  handlePastedText(e.clipboardData?.getData("text/plain") ?? e.clipboardData?.getData("text"));
+  pasteCatcher.blur();
+});
+
+// A real editable element — the raw-text editor, a form field — must keep
+// its own native paste behaviour; only step in when nothing else would.
+window.addEventListener("paste", (e) => {
+  const t = e.target;
+  if (t === pasteCatcher) return;   // handled above
+  if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
+  const text = e.clipboardData?.getData("text/plain") ?? e.clipboardData?.getData("text");
+  if (!text) return;
+  e.preventDefault();
+  handlePastedText(text);
+});
+
 document.getElementById("btnPaste").addEventListener("click", async () => {
-  if (!navigator.clipboard?.readText) {
-    toast("Clipboard access unavailable — use Edit text instead.");
-    return;
+  // file:// has no origin to attach a permission to, so Chrome/Edge/Firefox
+  // never show the clipboard-read prompt there — readText() would just
+  // reject every time, for every user, forever. Skip straight to the
+  // manual path instead of pretending a retry might someday succeed.
+  if (location.protocol !== "file:" && navigator.clipboard?.readText) {
+    try {
+      handlePastedText(await navigator.clipboard.readText());
+      return;
+    } catch (_) {
+      // Falls through to the manual-paste path below.
+    }
   }
-  try {
-    const text = await navigator.clipboard.readText();
-    if (!text.trim()) { toast("Clipboard is empty."); return; }
-    loadRaw(text, "pasted text", {
-      note: ` · ${text.length.toLocaleString()} characters`,
-    });
-  } catch (_) {
-    // Firefox and Safari deny readText without a user permission grant.
-    toast("Browser blocked clipboard read — use Edit text instead.");
-  }
+  pasteCatcher.value = "";
+  pasteCatcher.focus();
+  toast(
+    location.protocol === "file:"
+      ? "Paste needs Ctrl+V here — one-click paste only works when this is opened over http(s), e.g. the installed app or GitHub Pages."
+      : "Press Ctrl+V (or Cmd+V) to paste."
+  );
 });
 
 /* --- drag and drop --- */
