@@ -846,11 +846,48 @@ function loadMarked() {
   return markedPromise;
 }
 
+/**
+ * An un-indented fenced code block between numbered steps is common in
+ * AI-generated Markdown (Copilot, ChatGPT) but, under the CommonMark spec,
+ * ends the list it followed — a fence only stays part of a list item when
+ * indented to that item's content column, and the lazy-continuation rule
+ * that lets a plain paragraph get away with this doesn't extend to fences.
+ * So marked (correctly, per spec) emits three separate <ol>s for a
+ * three-step guide with a snippet after each step, and since a fresh <ol>
+ * always starts counting at 1 with no `start` attribute, steps 2 and 3
+ * render as "1." again. This restores the numbering across that split
+ * without touching the nesting itself — a heading, an <hr>, or a bullet
+ * list in between is treated as a genuine new topic and resets the count,
+ * but a code block, blockquote, table, or paragraph in between is treated
+ * as supporting content for the step just described.
+ */
+function continueSplitOrderedLists(root) {
+  let count = 0;
+  let next = 1;
+  let active = false;
+  for (const child of root.children) {
+    if (child.tagName === "OL") {
+      if (active) {
+        next += count;
+        child.setAttribute("start", String(next));
+      } else {
+        active = true;
+        next = parseInt(child.getAttribute("start") || "1", 10);
+      }
+      count = child.children.length;
+    } else if (/^H[1-6]$/.test(child.tagName) || child.tagName === "HR" || child.tagName === "UL") {
+      active = false;
+    }
+  }
+  return root;
+}
+
 async function markdownToDom(src) {
   const marked = await loadMarked();
   const html = marked.parse(String(src), { gfm: true, breaks: false });
   const doc = new DOMParser().parseFromString(html, "text/html");
-  return sanitizeHtmlDoc(doc, (imgSrc) => (SAFE_IMAGE.test(imgSrc) ? imgSrc : null));
+  const sanitized = sanitizeHtmlDoc(doc, (imgSrc) => (SAFE_IMAGE.test(imgSrc) ? imgSrc : null));
+  return continueSplitOrderedLists(sanitized);
 }
 
 /* ------------------------------------------------------------------ *
