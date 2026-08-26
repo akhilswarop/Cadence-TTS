@@ -2043,8 +2043,26 @@ function looksLikeMarkdown(s) {
  *  cleaned exactly like a dropped .md file. Async because rendering now
  *  means loading marked on first use — same lazy-CDN shape as PDF/EPUB, so
  *  plain text and typed prose never pay for a library they don't need. */
-async function prepareDoc(raw, { forceMarkdown = false, cleanable = true } = {}) {
+async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html = null } = {}) {
   if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
+
+  // A paste can carry real structure as HTML even when its plain-text
+  // fallback has none — copying a rich answer (Copilot, a browser page)
+  // commonly puts a fully-formatted text/html payload on the clipboard
+  // alongside a flattened text/plain one with every ** and | stripped out.
+  // Obsidian and Word read the HTML and convert it back to formatting;
+  // reading only text/plain, as this app used to, got the flattened
+  // fallback with nothing left for Markdown detection to find. Parsed
+  // through the same sanitiser EPUB and Markdown already share, rather
+  // than trusted via innerHTML, since it's third-party content either way.
+  if (html) {
+    const tree = sanitizeHtmlDoc(
+      new DOMParser().parseFromString(html, "text/html"),
+      (imgSrc) => (SAFE_IMAGE.test(imgSrc) ? imgSrc : null)
+    );
+    if (tree.childNodes.length) return { text: null, tree };
+  }
+
   if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
 
   let tree;
@@ -2251,12 +2269,12 @@ async function extractPdf(file, onProgress) {
 
 /** Holds on to the untouched source so the Clean markup toggle can switch
  *  between raw and cleaned without needing the original file again. */
-async function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "" } = {}) {
+async function loadRaw(raw, label, { forceMarkdown = false, cleanable = true, note = "", html = null } = {}) {
   exitEpubMode();
-  app.raw = { text: raw, forceMarkdown, cleanable };
+  app.raw = { text: raw, forceMarkdown, cleanable, html };
   app.engine?.stop();
   app.renderer.clear();
-  const doc = await prepareDoc(raw, { forceMarkdown, cleanable });
+  const doc = await prepareDoc(raw, { forceMarkdown, cleanable, html });
   app.load(doc.text, doc.tree);
   setSource(label);
   toast(`Loaded ${label}${note}`);
@@ -2395,16 +2413,27 @@ Object.assign(pasteCatcher.style, {
 });
 document.body.appendChild(pasteCatcher);
 
-function handlePastedText(text) {
+// html is the clipboard's text/html flavour, when present — pasting a
+// rich answer (Copilot, a browser selection) commonly puts a fully
+// formatted HTML payload on the clipboard alongside a text/plain fallback
+// that's been flattened to plain prose, no ** or | left in it at all.
+// Reading only text/plain, as this used to, got the flattened fallback
+// with nothing left for Markdown detection to find, even though the same
+// paste looked perfectly formatted in an app that reads the HTML flavour.
+function handlePastedText(text, html = null) {
   if (!text || !text.trim()) { toast("Clipboard is empty."); return; }
   loadRaw(text, "pasted text", {
     note: ` · ${text.length.toLocaleString()} characters`,
+    html,
   });
 }
 
 pasteCatcher.addEventListener("paste", (e) => {
   e.preventDefault();
-  handlePastedText(e.clipboardData?.getData("text/plain") ?? e.clipboardData?.getData("text"));
+  handlePastedText(
+    e.clipboardData?.getData("text/plain") ?? e.clipboardData?.getData("text"),
+    e.clipboardData?.getData("text/html") || null
+  );
   pasteCatcher.blur();
 });
 
@@ -2417,7 +2446,7 @@ window.addEventListener("paste", (e) => {
   const text = e.clipboardData?.getData("text/plain") ?? e.clipboardData?.getData("text");
   if (!text) return;
   e.preventDefault();
-  handlePastedText(text);
+  handlePastedText(text, e.clipboardData?.getData("text/html") || null);
 });
 
 document.getElementById("btnPaste").addEventListener("click", async () => {
@@ -2435,7 +2464,27 @@ document.getElementById("btnPaste").addEventListener("click", async () => {
   // never show the clipboard-read prompt there — readText() would just
   // reject every time, for every user, forever. Skip straight to the
   // manual path instead of pretending a retry might someday succeed.
-  if (location.protocol !== "file:" && navigator.clipboard?.readText) {
+  if (location.protocol !== "file:" && navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      let text = "", html = null;
+      for (const item of items) {
+        if (item.types.includes("text/plain")) {
+          text = await (await item.getType("text/plain")).text();
+        }
+        // The read() API can expose text/html even though readText() —
+        // used below as the fallback for a browser without read() at all
+        // — is permanently limited to plain text by its own spec.
+        if (item.types.includes("text/html")) {
+          html = await (await item.getType("text/html")).text();
+        }
+      }
+      handlePastedText(text, html);
+      return;
+    } catch (_) {
+      // Falls through to the manual-paste path below.
+    }
+  } else if (location.protocol !== "file:" && navigator.clipboard?.readText) {
     try {
       handlePastedText(await navigator.clipboard.readText());
       return;
