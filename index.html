@@ -254,6 +254,47 @@
   }
   .w:hover:not(.active) { box-shadow: 0 0 0 2px var(--chip); background: var(--chip); }
 
+  /* Original-layout PDF mode: the canvas is the page itself and pdf.js's
+     untouched text runs sit invisibly above it. Playback selects a precise
+     Range in that native text layer, so the browser paints the same kind of
+     highlight it uses for ordinary text selection — no synthetic word box. */
+  .pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .pdf-page { position: relative; box-shadow: var(--shadow-sm); }
+  .pdf-page canvas { display: block; }
+  .textLayer {
+    position: absolute; inset: 0; overflow: clip;
+    line-height: 1; text-size-adjust: none; transform-origin: 0 0;
+  }
+  .textLayer > span, .textLayer > br {
+    color: transparent; position: absolute; white-space: pre;
+    cursor: text; transform-origin: 0% 0%;
+  }
+  .textLayer .w { padding: 0; cursor: pointer; position: static; transform: none; }
+  .textLayer .w.active, .textLayer .w.spoken { color: transparent; }
+  .textLayer .w.sentence { background: none; box-shadow: none; }
+  .textLayer .w.active {
+    background: rgba(244, 255, 46, 0.55);
+    box-shadow: none; border-radius: 2px;
+  }
+  .textLayer .w:hover:not(.active) {
+    background: rgba(244, 255, 46, 0.55);
+    box-shadow: none;
+  }
+  /* Without this, a manual drag-select falls back to the browser's UA
+     default `::selection { color: HighlightText }`, which overrides our
+     `color: transparent` and reveals the invisible text — tinted to
+     match the app's own highlight instead of the system blue. */
+  .textLayer ::selection {
+    color: transparent;
+    background: rgba(244, 255, 46, 0.45);
+  }
+  /* The yellow version: a browser range highlight over the invisible
+     text layer, with the PDF canvas glyph still visible below. */
+  .textLayer ::highlight(wordbeat-active) {
+    background: rgba(244, 255, 46, 0.55);
+    color: transparent;
+  }
+
   #editor {
     display: block; width: 100%; min-height: 60vh;
     max-width: var(--measure); margin: 0 auto;
@@ -698,9 +739,12 @@ class Renderer {
     this.el = el;
     this.spans = [];
     this.active = -1;
+    this.rangeHighlighter = null;
   }
 
   render(text, tokens) {
+    this.rangeHighlighter?.clear();
+    this.rangeHighlighter = null;
     const frag = document.createDocumentFragment();
     this.spans = [];
     let cursor = 0;
@@ -728,10 +772,12 @@ class Renderer {
   }
 
   /** Take an already-built tree whose words buildFromDom has wrapped. */
-  adopt(tree, spans) {
+  adopt(tree, spans, rangeHighlighter = null) {
+    this.rangeHighlighter?.clear();
     this.el.replaceChildren(tree);
     this.el.classList.add("rich");
     this.spans = spans;
+    this.rangeHighlighter = rangeHighlighter;
     this.active = -1;
     this._sFrom = this._sTo = null;
   }
@@ -751,17 +797,22 @@ class Renderer {
   highlight(index, { scroll = true } = {}) {
     if (index === this.active || index < 0 || index >= this.spans.length) return;
 
-    if (this.active >= 0) {
+    if (this.rangeHighlighter) {
+      this.rangeHighlighter.set(index);
+    } else if (this.active >= 0) {
       this.spans[this.active].classList.remove("active");
     }
-    // Mark everything up to here as spoken, so progress reads at a glance
-    // even after a seek backwards.
-    for (let i = 0; i < this.spans.length; i++) {
-      this.spans[i].classList.toggle("spoken", i < index);
+    // Mark everything up to here as spoken in reflow mode. Fixed-layout
+    // PDFs reuse their positioned text run as a scroll anchor for several
+    // words, so only the native Selection should paint there.
+    if (!this.rangeHighlighter) {
+      for (let i = 0; i < this.spans.length; i++) {
+        this.spans[i].classList.toggle("spoken", i < index);
+      }
     }
 
     const span = this.spans[index];
-    span.classList.add("active");
+    if (!this.rangeHighlighter) span.classList.add("active");
     this.active = index;
 
     if (scroll) this._follow(span);
@@ -780,6 +831,9 @@ class Renderer {
   /** Soft band over the sentence being spoken. Only the edges of the range
    *  are touched when it moves, so this stays cheap on long documents. */
   setSentence(from, to) {
+    // Fixed-layout PDFs use one native-style active-word mark; a sentence
+    // band would tint whole lines of the original page and obscure layout.
+    if (this.rangeHighlighter) return;
     if (this._sFrom === from && this._sTo === to) return;
     if (this._sFrom != null) {
       for (let i = this._sFrom; i <= this._sTo && i < this.spans.length; i++) {
@@ -794,11 +848,35 @@ class Renderer {
   }
 
   clear() {
-    if (this.active >= 0) this.spans[this.active].classList.remove("active");
+    if (this.rangeHighlighter) this.rangeHighlighter.clear();
+    else if (this.active >= 0) this.spans[this.active].classList.remove("active");
     this.spans.forEach(s => s.classList.remove("spoken", "sentence"));
     this.active = -1;
     this._sFrom = this._sTo = null;
   }
+}
+
+/**
+ * A named browser highlight over the current invisible word span. The PDF
+ * canvas keeps drawing the visible glyph beneath the translucent yellow mark.
+ */
+function createNativeRangeHighlighter(spans) {
+  const registry = globalThis.CSS?.highlights;
+  if (!registry || typeof globalThis.Highlight !== "function") return null;
+
+  const name = "wordbeat-active";
+  return {
+    set(index) {
+      const span = spans[index];
+      if (!span) return;
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      registry.set(name, new globalThis.Highlight(range));
+    },
+    clear() {
+      registry.delete(name);
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1696,9 +1774,20 @@ const app = {
   renderer: new Renderer(el.reader),
   engine: null,
 
-  /** `tree` is a rendered Markdown DOM; without it, text renders flat. */
-  load(text, tree = null) {
-    if (tree) {
+  /** `tree` is a rendered Markdown/EPUB DOM; without it, text renders flat.
+   *  `prebuilt` is for a tree that already carries its own {text, tokens,
+   *  spans} — the original-layout PDF view, whose word spans are
+   *  positioned to match the page image rather than laid out in document
+   *  flow. Running that tree through buildFromDom would walk it in
+   *  document order and wrap every word in a fresh span all over again,
+   *  discarding the positions and the gap-based spacing this tree's own
+   *  spoken-text string already worked out from the PDF's coordinates. */
+  load(text, tree = null, prebuilt = null) {
+    if (prebuilt) {
+      this.text = prebuilt.text;
+      this.tokens = prebuilt.tokens;
+      this.renderer.adopt(tree, prebuilt.spans, prebuilt.rangeHighlighter);
+    } else if (tree) {
       const built = buildFromDom(tree);
       this.text = built.text;
       this.tokens = built.tokens;
@@ -2095,15 +2184,10 @@ function setSource(label, fullLabel = label) {
 }
 
 /* ---------------------------- PDF ---------------------------------- *
- * PDFs store glyphs at coordinates, not sentences. `getTextContent()`
- * returns positioned fragments, so naively joining them yields garbage:
- * no spaces where the layout implied them, a hard break at every visual
- * line, and words split across lines by hyphenation.
- *
- * Read aloud, that is the difference between a document and noise —
- * "inter-\nruption" becomes "inter" ... "ruption". So the fragments are
- * reassembled into lines by baseline, lines into paragraphs by vertical
- * gap, and hyphenated words rejoined before anything reaches the reader.
+ * PDFs store glyphs at coordinates, not sentences, and drawing order is
+ * often unrelated to reading order. Each page is rasterized to a canvas
+ * exactly as designed, with pdf.js's own invisible text layer positioned
+ * on top of it — see extractPdfOriginalLayout below.
  * ------------------------------------------------------------------- */
 
 const PDFJS_VERSION = "4.10.38";
@@ -2123,109 +2207,6 @@ function loadPdfJs() {
   return pdfjsPromise;
 }
 
-/** Group positioned fragments into lines, bucketing by baseline. */
-function linesFromItems(items) {
-  const lines = [];
-
-  for (const it of items) {
-    if (!it.str) continue;
-    const x = it.transform[4];
-    const y = it.transform[5];
-    const h = it.height || Math.abs(it.transform[3]) || 10;
-
-    // Glyphs on one visual line rarely share an exact baseline, so match
-    // within a fraction of the font height rather than on equality.
-    let line = null;
-    for (const l of lines) {
-      if (Math.abs(l.y - y) <= Math.max(1.5, l.h * 0.4)) { line = l; break; }
-    }
-    if (!line) { line = { y, h, parts: [] }; lines.push(line); }
-
-    line.parts.push({ x, w: it.width || 0, str: it.str });
-    line.h = Math.max(line.h, h);
-  }
-
-  lines.sort((a, b) => b.y - a.y);          // PDF origin sits bottom-left
-  for (const l of lines) l.parts.sort((a, b) => a.x - b.x);
-
-  return lines
-    .map((l) => ({ y: l.y, h: l.h, text: assembleLine(l).trim() }))
-    .filter((l) => l.text);
-}
-
-/** Join one line's fragments, inserting a space only at a real gap. */
-function assembleLine(line) {
-  let s = "";
-  let prevEnd = null;
-  for (const p of line.parts) {
-    if (
-      prevEnd !== null &&
-      p.x - prevEnd > line.h * 0.18 &&
-      !/\s$/.test(s) && !/^\s/.test(p.str)
-    ) {
-      s += " ";
-    }
-    s += p.str;
-    prevEnd = p.x + p.w;
-  }
-  return s;
-}
-
-/** Lines into paragraphs: a gap well above the median means a new one. */
-function joinLines(lines) {
-  if (!lines.length) return "";
-
-  const gaps = [];
-  for (let i = 1; i < lines.length; i++) gaps.push(lines[i - 1].y - lines[i].y);
-  const sorted = gaps.slice().sort((a, b) => a - b);
-  const median = sorted.length ? sorted[sorted.length >> 1] : 0;
-  const paraGap = median * 1.45;
-
-  let out = lines[0].text;
-  for (let i = 1; i < lines.length; i++) {
-    const gap = lines[i - 1].y - lines[i].y;
-    const cur = lines[i].text;
-
-    if (median > 0 && gap > paraGap) { out += "\n\n" + cur; continue; }
-
-    // Rejoin words split by end-of-line hyphenation, but leave real
-    // compounds alone — only a lowercase continuation is a split word.
-    if (/[A-Za-z]-$/.test(out) && /^[a-z]/.test(cur)) out = out.slice(0, -1) + cur;
-    else out += " " + cur;
-  }
-  return out;
-}
-
-/** Drop running heads, footers, and bare page numbers.
- *  Detected by repetition across pages rather than by position, so a
- *  first-page title isn't mistaken for a header. */
-function stripRunningHeaders(pageLines) {
-  if (pageLines.length < 3) return pageLines;
-
-  const norm = (s) => s.replace(/\d+/g, "#").trim().toLowerCase();
-  const top = new Map();
-  const bottom = new Map();
-
-  for (const lines of pageLines) {
-    if (!lines.length) continue;
-    const t = norm(lines[0].text);
-    const b = norm(lines[lines.length - 1].text);
-    top.set(t, (top.get(t) || 0) + 1);
-    bottom.set(b, (bottom.get(b) || 0) + 1);
-  }
-
-  const threshold = Math.max(3, pageLines.length * 0.5);
-
-  return pageLines.map((lines) => {
-    let out = lines;
-    if (out.length && (top.get(norm(out[0].text)) || 0) >= threshold) out = out.slice(1);
-    if (out.length && (bottom.get(norm(out[out.length - 1].text)) || 0) >= threshold) {
-      out = out.slice(0, -1);
-    }
-    return out.filter((l) => !/^\s*\d{1,4}\s*$/.test(l.text));
-  });
-}
-
 // Written as escapes, not literal glyphs: if this file is ever served
 // without a UTF-8 charset, literal ligatures decode to mojibake and the
 // character-class range below becomes a parse error that kills the whole
@@ -2235,34 +2216,216 @@ const LIGATURES = {
   "\uFB03": "ffi", "\uFB04": "ffl", "\uFB05": "st", "\uFB06": "st",
 };
 
-/** Ligature glyphs and soft hyphens are invisible on screen but audible. */
-function normalizePdfText(s) {
-  return s
-    .replace(/[\uFB00-\uFB06]/g, (m) => LIGATURES[m] || m)
-    .replace(/\u00AD/g, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+// Built from LIGATURES' own keys and a numeric char code rather than
+// written as escapes a second time here, so there's exactly one place in
+// the file spelling out these code points instead of two copies that
+// could quietly drift apart.
+const LIGATURE_RE = new RegExp("[" + Object.keys(LIGATURES).join("") + "]", "g");
+const SOFT_HYPHEN = String.fromCharCode(173);
+
+/**
+ * Each page is rendered to a canvas exactly as the PDF specifies, and
+ * pdf.js's own TextLayer — the same technique a browser's native PDF
+ * viewer uses to make rendered text selectable — positions an invisible
+ * copy of the text directly on top of it. Splitting each positioned text
+ * run into its own per-word span turns that invisible layer into the
+ * same {tree, spans} shape buildFromDom produces for Markdown and EPUB,
+ * so the highlight, autoscroll, and sentence-band code needs no changes
+ * at all to work here — the one difference is that app.load takes this
+ * bundle pre-built (see the `prebuilt` note there) rather than deriving
+ * it from the tree.
+ *
+ * PDF drawing order is often unrelated to visible reading order: a word
+ * can be painted after text from elsewhere on the page. The timing track
+ * therefore follows visual lines (top-to-bottom, then left-to-right), not
+ * the raw content stream. This keeps the word the voice says tied to the
+ * word it highlights on ordinary pages — complex multi-column forms can
+ * still be ambiguous.
+ */
+function orderPdfItemsVisually(records) {
+  const pages = new Map();
+  for (const record of records) {
+    const page = pages.get(record.page) || [];
+    page.push(record);
+    pages.set(record.page, page);
+  }
+
+  const ordered = [];
+  for (const pageNumber of [...pages.keys()].sort((a, b) => a - b)) {
+    const source = pages.get(pageNumber).sort((a, b) => b.y - a.y || a.x - b.x);
+    const lines = [];
+
+    for (const record of source) {
+      const line = lines.find((candidate) =>
+        Math.abs(record.y - candidate.y) <= Math.max(1.5, Math.max(record.height, candidate.height) * 0.4)
+      );
+      if (line) {
+        line.records.push(record);
+      } else {
+        lines.push({ y: record.y, height: record.height, records: [record] });
+      }
+    }
+
+    for (const line of lines) {
+      line.records.sort((a, b) => a.x - b.x || a.sourceIndex - b.sourceIndex);
+      ordered.push(...line.records);
+    }
+  }
+  return ordered;
 }
 
-async function extractPdf(file, onProgress) {
+async function extractPdfOriginalLayout(file, onProgress) {
   const pdfjs = await loadPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
   const doc = await pdfjs.getDocument({ data }).promise;
 
-  const pages = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    onProgress?.(i, doc.numPages);
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(linesFromItems(content.items));
+  const root = document.createElement("div");
+  root.className = "pdf-pages";
+  const tokens = [];
+  const spans = [];
+  let spoken = "";
+
+  // A target width rather than a fixed scale, so the rendered page fills
+  // the same reading column as every other format instead of coming out
+  // a fixed size regardless of viewport — capped so a phone-width column
+  // doesn't force a blurry upscale of a small source page.
+  const targetWidth = Math.min(el.reader?.clientWidth || 900, 1100) * (window.devicePixelRatio || 1);
+
+  for (let n = 1; n <= doc.numPages; n++) {
+    onProgress?.(n, doc.numPages);
+    const page = await doc.getPage(n);
+    const unscaled = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: targetWidth / unscaled.width });
+
+    const pageEl = document.createElement("div");
+    pageEl.className = "pdf-page";
+    pageEl.style.width = viewport.width / (window.devicePixelRatio || 1) + "px";
+    pageEl.style.height = viewport.height / (window.devicePixelRatio || 1) + "px";
+
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    pageEl.appendChild(canvas);
+
+    // The text layer's own coordinate space has to match the canvas's
+    // CSS size, not its (device-pixel-ratio-scaled) internal resolution,
+    // or every word lands at the wrong place once the canvas is scaled
+    // back down by that same ratio via its own CSS width/height above.
+    const cssViewport = page.getViewport({ scale: viewport.scale / (window.devicePixelRatio || 1) });
+    const textLayerDiv = document.createElement("div");
+    textLayerDiv.className = "textLayer";
+    // TextLayer's own per-word inline styles (font-size, letter-spacing)
+    // are all `calc(var(--scale-factor) * Npx)` expressions — it expects
+    // whoever hosts it to define that custom property. The full pdf.js
+    // viewer sets it on the page container; since we drive TextLayer
+    // directly, without that viewer, nothing ever set it. Left undefined,
+    // every such calc() falls back to the *inherited* font-size (the
+    // reader's own reading-size text) instead of each word's real PDF
+    // size, so word boxes end up far larger than their canvas glyphs —
+    // exactly what let highlight boxes drift into blank space or past
+    // line ends, and let a manual selection reveal oversized fallback
+    // text instead of staying invisible over the correctly-sized glyph.
+    textLayerDiv.style.setProperty("--scale-factor", String(cssViewport.scale));
+    pageEl.appendChild(textLayerDiv);
+
+    const textContent = await page.getTextContent();
+    const textLayer = new pdfjs.TextLayer({
+      textContentSource: textContent,
+      container: textLayerDiv,
+      viewport: cssViewport,
+    });
+    await textLayer.render();
+
+    // Each PDF text item has a matching positioned div. Build invisible word
+    // nodes inside it; visual coordinate ordering is established below.
+    const divs = textLayer.textDivs;
+    const pageRecords = [];
+
+    for (let i = 0; i < textContent.items.length; i++) {
+      const item = textContent.items[i];
+      if (!item.str) continue;
+      const div = divs[i];
+      if (!div) continue;
+
+      const text = item.str
+        .replace(LIGATURE_RE, (c) => LIGATURES[c] || c)
+        .split(SOFT_HYPHEN).join("");
+      div.replaceChildren();
+      let cursor = 0, m;
+      const words = [];
+      WORD_RE.lastIndex = 0;
+      while ((m = WORD_RE.exec(text)) !== null) {
+        if (m.index > cursor) div.appendChild(document.createTextNode(text.slice(cursor, m.index)));
+        const span = document.createElement("span");
+        span.className = "w";
+        span.textContent = m[0];
+        words.push({ span, text: m[0], start: m.index, end: m.index + m[0].length });
+        div.appendChild(span);
+        cursor = m.index + m[0].length;
+      }
+      if (cursor < text.length) div.appendChild(document.createTextNode(text.slice(cursor)));
+
+      pageRecords.push({
+        page: n,
+        sourceIndex: i,
+        x: item.transform[4],
+        y: item.transform[5],
+        width: item.width || 0,
+        height: item.height || Math.abs(item.transform[3]) || 10,
+        text,
+        words,
+      });
+    }
+
+    root.appendChild(pageEl);
+
+    const visualRecords = orderPdfItemsVisually(pageRecords);
+    if (n > 1 && spoken && visualRecords.length) spoken += "\n\n";
+    let previous = null;
+
+    for (const record of visualRecords) {
+      if (previous) {
+        const h = Math.max(record.height, previous.height, 10);
+        const sameLine = Math.abs(record.y - previous.y) <= Math.max(1.5, h * 0.4);
+        if (sameLine) {
+          const gap = record.x - (previous.x + previous.width);
+          if (gap > h * 0.18 && !/\s$/.test(spoken) && !/^\s/.test(record.text)) spoken += " ";
+        } else {
+          const vgap = previous.y - record.y;
+          spoken += vgap > h * 2.5 ? "\n\n" : " ";
+        }
+      }
+
+      const base = spoken.length;
+      for (const word of record.words) {
+        word.span.dataset.i = String(tokens.length);
+        tokens.push({
+          index: tokens.length,
+          text: word.text,
+          start: base + word.start,
+          end: base + word.end,
+        });
+        spans.push(word.span);
+      }
+      spoken += record.text;
+      previous = record;
+    }
   }
 
-  const text = normalizePdfText(
-    stripRunningHeaders(pages).map(joinLines).filter(Boolean).join("\n\n")
-  );
-
-  return { text, pages: doc.numPages };
+  // Not trimmed or whitespace-collapsed: doing so here would shift every
+  // token's offset out from under a string whose length it was already
+  // measured against, item by item, above.
+  return {
+    tree: root,
+    text: spoken,
+    tokens,
+    spans,
+    pages: doc.numPages,
+    rangeHighlighter: createNativeRangeHighlighter(spans),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -2347,21 +2510,22 @@ async function importFile(file) {
     }
 
     if (isPdf) {
-      toast(`Reading ${file.name}…`, 60000);
-      const { text, pages } = await extractPdf(file, (n, total) => {
-        toast(`Extracting page ${n} of ${total}…`, 60000);
+      toast(`Rendering ${file.name}…`, 60000);
+      const { tree, text, tokens, spans, pages, rangeHighlighter } = await extractPdfOriginalLayout(file, (n, total) => {
+        toast(`Rendering page ${n} of ${total}…`, 60000);
       });
 
-      if (!text.trim()) {
+      if (!tokens.length) {
         toast("No text found — this PDF is probably scanned images, which need OCR.");
         return;
       }
-      // Extracted PDF prose is already plain; running the Markdown stripper
-      // over it could only damage it.
-      loadRaw(text, file.name, {
-        cleanable: false,
-        note: ` · ${pages} page${pages === 1 ? "" : "s"}`,
-      });
+      exitEpubMode();
+      app.raw = null;   // no raw/rendered toggle for a fixed-layout page
+      app.engine?.stop();
+      app.renderer.clear();
+      app.load(null, tree, { text, tokens, spans, rangeHighlighter });
+      setSource(file.name);
+      toast(`Loaded ${file.name} · ${pages} page${pages === 1 ? "" : "s"}`);
       return;
     }
 
