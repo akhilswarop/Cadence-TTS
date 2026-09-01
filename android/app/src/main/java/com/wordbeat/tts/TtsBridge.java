@@ -182,6 +182,29 @@ public class TtsBridge {
         }
     }
 
+    /**
+     * Android's ClipData carries an HTML representation alongside its plain
+     * text the same way a desktop clipboard does (ClipData.newHtmlText is a
+     * standard Android API, and most apps that copy rich content — ChatGPT
+     * included — use it). readClipboardText() above only ever coerced the
+     * plain-text fallback, which many apps flatten to bare prose with no
+     * Markdown syntax left in it at all, so nothing was ever left for this
+     * app's own Markdown detection to find. This is the missing other half.
+     */
+    @JavascriptInterface
+    public String readClipboardHtml() {
+        try {
+            ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) return "";
+            ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence html = clip.getItemAt(0).getHtmlText();
+            return html == null ? "" : html.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     void shutdown() {
         try {
             tts.stop();

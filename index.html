@@ -2628,7 +2628,10 @@ document.getElementById("btnPaste").addEventListener("click", async () => {
   // permission entirely rather than falling back to a Ctrl+V that a touch
   // keyboard doesn't have.
   if (window.AndroidTTS?.readClipboardText) {
-    handlePastedText(window.AndroidTTS.readClipboardText());
+    handlePastedText(
+      window.AndroidTTS.readClipboardText(),
+      window.AndroidTTS.readClipboardHtml?.() || null
+    );
     return;
   }
   // file:// has no origin to attach a permission to, so Chrome/Edge/Firefox
