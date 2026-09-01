@@ -2135,15 +2135,31 @@ function looksLikeMarkdown(s) {
 async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html = null } = {}) {
   if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
 
-  // A paste can carry real structure as HTML even when its plain-text
-  // fallback has none — copying a rich answer (Copilot, a browser page)
-  // commonly puts a fully-formatted text/html payload on the clipboard
-  // alongside a flattened text/plain one with every ** and | stripped out.
-  // Obsidian and Word read the HTML and convert it back to formatting;
-  // reading only text/plain, as this app used to, got the flattened
-  // fallback with nothing left for Markdown detection to find. Parsed
-  // through the same sanitiser EPUB and Markdown already share, rather
-  // than trusted via innerHTML, since it's third-party content either way.
+  // Plain-text Markdown is tried before the clipboard's HTML flavour, not
+  // after: marked's own GFM table parser is far more reliable than a third
+  // -party app's clipboard HTML, which often renders a table as styled
+  // <div>s with no real <table> element at all — that HTML sails through
+  // sanitizeHtmlDoc as plain paragraphs, silently losing the table, even
+  // though the plain-text flavour still has valid pipe-table syntax. Apps
+  // that keep real Markdown in their plain text (Copilot, ChatGPT, a .md
+  // file) render correctly this way every time instead of only sometimes.
+  if (forceMarkdown || looksLikeMarkdown(raw)) {
+    let tree;
+    try {
+      tree = await markdownToDom(raw);
+    } catch (err) {
+      toast("Couldn't load the Markdown renderer — this needs a network connection. Showing raw text.");
+      return { text: raw, tree: null };
+    }
+    if (tree.childNodes.length) return { text: null, tree };
+  }
+
+  // Only reached when the plain text didn't look like Markdown (or parsed
+  // to nothing) — the HTML flavour is now the fallback, for sources that
+  // flatten their own plain text and leave nothing for Markdown detection
+  // to find (Word, Obsidian's rich copy). Parsed through the same sanitiser
+  // EPUB and Markdown already share, rather than trusted via innerHTML,
+  // since it's third-party content either way.
   if (html) {
     const tree = sanitizeHtmlDoc(
       new DOMParser().parseFromString(html, "text/html"),
@@ -2153,15 +2169,6 @@ async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html =
   }
 
   if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
-
-  let tree;
-  try {
-    tree = await markdownToDom(raw);
-  } catch (err) {
-    toast("Couldn't load the Markdown renderer — this needs a network connection. Showing raw text.");
-    return { text: raw, tree: null };
-  }
-  if (tree.childNodes.length) return { text: null, tree };
 
   // Nothing parsed into blocks. Fall back to stripping the syntax so the
   // symbols still are not read aloud, and never hand back an empty document.
