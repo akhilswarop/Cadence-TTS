@@ -17,6 +17,8 @@ import android.graphics.Insets;
 import android.os.Build;
 import android.view.WindowInsets;
 
+import org.json.JSONObject;
+
 import java.util.Locale;
 
 /**
@@ -49,6 +51,15 @@ public class MainActivity extends Activity {
      * triggers a fresh inset pass.
      */
     private String insetScript;
+
+    /*
+     * A share from another app's own Share button arrives as an intent, not
+     * a DOM event, and can arrive before the page has finished loading (cold
+     * start) or after (the app was already open). Held here and flushed once
+     * onPageFinished confirms handlePastedText actually exists to call.
+     */
+    private boolean pageReady;
+    private String pendingSharedText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -97,6 +108,8 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (insetScript != null) view.evaluateJavascript(insetScript, null);
+                pageReady = true;
+                deliverPendingShare();
             }
         });
 
@@ -167,6 +180,46 @@ public class MainActivity extends Activity {
 
         web.loadUrl("file:///android_asset/index.html");
         setContentView(web);
+
+        handleIncomingIntent(getIntent());
+    }
+
+    /*
+     * android:launchMode="singleTask" routes a share into the already-running
+     * instance here instead of spawning a second Activity — without it, the
+     * app would silently duplicate itself every time something was shared to
+     * it while already open.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingIntent(intent);
+    }
+
+    /**
+     * A share from another app's own Share button — as opposed to a
+     * copy/paste — arrives as an ACTION_SEND intent carrying one plain-text
+     * string. Handed to the same handlePastedText the paste path already
+     * uses, so it gets the identical Markdown/table detection rather than a
+     * separate, parallel code path to keep in sync.
+     */
+    private void handleIncomingIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+        String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (text == null || text.isEmpty()) return;
+        pendingSharedText = text;
+        deliverPendingShare();
+    }
+
+    private void deliverPendingShare() {
+        if (!pageReady || pendingSharedText == null) return;
+        String text = pendingSharedText;
+        pendingSharedText = null;
+        // JSONObject.quote wraps the string as a JSON string literal —
+        // already valid JS syntax, and unlike hand-rolled escaping it
+        // handles quotes, backslashes, and newlines correctly.
+        web.evaluateJavascript("handlePastedText(" + JSONObject.quote(text) + ")", null);
     }
 
     @Override

@@ -24,11 +24,20 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Lets WordBeat appear in another app's Share sheet, so text can
+                 go straight from e.g. a chat app to being read aloud here
+                 instead of a manual copy/paste round trip. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
     </application>
