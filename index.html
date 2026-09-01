@@ -2135,37 +2135,41 @@ function looksLikeMarkdown(s) {
 async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html = null } = {}) {
   if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
 
-  // Plain-text Markdown is tried before the clipboard's HTML flavour, not
-  // after: marked's own GFM table parser is far more reliable than a third
-  // -party app's clipboard HTML, which often renders a table as styled
-  // <div>s with no real <table> element at all — that HTML sails through
-  // sanitizeHtmlDoc as plain paragraphs, silently losing the table, even
-  // though the plain-text flavour still has valid pipe-table syntax. Apps
-  // that keep real Markdown in their plain text (Copilot, ChatGPT, a .md
-  // file) render correctly this way every time instead of only sometimes.
+  // A document can have real Markdown syntax (headings, a "---" rule, bold
+  // text) everywhere *except* its table — some sources keep a genuine
+  // <table> in their clipboard HTML while flattening those same rows to
+  // tab-separated plain text with no pipe syntax at all (ChatGPT's "Copy"
+  // button does this). Picking one flavour for the whole document either
+  // way loses something: Markdown-only misses that table; HTML-only risks
+  // the "styled <div>s, no real <table>" case the other direction. So both
+  // are parsed when both are available, and whichever one actually has a
+  // table wins — Markdown otherwise, since it preserves spoken punctuation
+  // and inline formatting more faithfully than a third party's clipboard
+  // HTML.
+  let mdTree = null;
   if (forceMarkdown || looksLikeMarkdown(raw)) {
-    let tree;
     try {
-      tree = await markdownToDom(raw);
+      mdTree = await markdownToDom(raw);
     } catch (err) {
       toast("Couldn't load the Markdown renderer — this needs a network connection. Showing raw text.");
       return { text: raw, tree: null };
     }
-    if (tree.childNodes.length) return { text: null, tree };
+    if (!mdTree.childNodes.length) mdTree = null;
   }
 
-  // Only reached when the plain text didn't look like Markdown (or parsed
-  // to nothing) — the HTML flavour is now the fallback, for sources that
-  // flatten their own plain text and leave nothing for Markdown detection
-  // to find (Word, Obsidian's rich copy). Parsed through the same sanitiser
-  // EPUB and Markdown already share, rather than trusted via innerHTML,
-  // since it's third-party content either way.
+  let htmlTree = null;
   if (html) {
-    const tree = sanitizeHtmlDoc(
+    htmlTree = sanitizeHtmlDoc(
       new DOMParser().parseFromString(html, "text/html"),
       (imgSrc) => (SAFE_IMAGE.test(imgSrc) ? imgSrc : null)
     );
-    if (tree.childNodes.length) return { text: null, tree };
+    if (!htmlTree.childNodes.length) htmlTree = null;
+  }
+
+  if (mdTree || htmlTree) {
+    const hasTable = (t) => !!t?.querySelector("table");
+    const preferHtml = htmlTree && hasTable(htmlTree) && !hasTable(mdTree);
+    return { text: null, tree: preferHtml ? htmlTree : (mdTree || htmlTree) };
   }
 
   if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
