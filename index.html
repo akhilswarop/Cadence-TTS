@@ -2135,18 +2135,35 @@ const MARKDOWN_SIGNALS = [
  */
 function tsvBlocksToMarkdownTables(raw) {
   const lines = raw.split("\n");
+  const cols = (l) => l.split("\t").length;
+  const emit = (out, rowLines) => {
+    const rows = rowLines.map((l) => l.split("\t").map((c) => c.trim().replace(/\|/g, "\\|")));
+    out.push("| " + rows[0].join(" | ") + " |");
+    out.push("| " + rows[0].map(() => "---").join(" | ") + " |");
+    for (const row of rows.slice(1)) out.push("| " + row.join(" | ") + " |");
+  };
+
   const out = [];
   let i = 0;
   while (i < lines.length) {
-    const cols = lines[i].split("\t").length;
-    if (cols >= 2) {
+    const c = cols(lines[i]);
+    if (c >= 2) {
+      // A copied table commonly keeps a blank line between its header row
+      // and its body, the way the source app visually separated them —
+      // without checking for it, that header line reads as plain text on
+      // its own and the first *data* row gets mistaken for the header.
+      if (lines[i + 1] === "" && lines[i + 2] !== undefined && cols(lines[i + 2]) === c) {
+        let j = i + 2;
+        while (j < lines.length && cols(lines[j]) === c) j++;
+        emit(out, [lines[i], ...lines.slice(i + 2, j)]);
+        i = j;
+        continue;
+      }
+
       let j = i + 1;
-      while (j < lines.length && lines[j].split("\t").length === cols) j++;
+      while (j < lines.length && cols(lines[j]) === c) j++;
       if (j - i >= 2) {
-        const rows = lines.slice(i, j).map((l) => l.split("\t").map((c) => c.trim().replace(/\|/g, "\\|")));
-        out.push("| " + rows[0].join(" | ") + " |");
-        out.push("| " + rows[0].map(() => "---").join(" | ") + " |");
-        for (const row of rows.slice(1)) out.push("| " + row.join(" | ") + " |");
+        emit(out, lines.slice(i, j));
         i = j;
         continue;
       }
