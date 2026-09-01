@@ -2119,6 +2119,44 @@ const MARKDOWN_SIGNALS = [
   /^\s{0,3}>[ \t]+\S/m,
 ];
 
+/**
+ * ChatGPT's own "Copy" button — verified directly by intercepting its
+ * clipboard write — puts a table on the clipboard as plain tab-separated
+ * text, the same convention as copying out of a spreadsheet: no Markdown
+ * pipe syntax, no HTML, nothing else for the Markdown/HTML detection below
+ * to find at all. A run of two or more consecutive lines that each split
+ * on tab into the same number of fields (more than one) is a strong,
+ * unambiguous signal on its own — ordinary prose essentially never
+ * contains a literal tab character, let alone a rectangular grid of them —
+ * so this rewrites that shape into real pipe-table syntax before anything
+ * else inspects the text, letting the normal Markdown path pick it up
+ * unchanged. Runs even when nothing else here looks like Markdown, since a
+ * bare copied table has no other structure to trigger detection with.
+ */
+function tsvBlocksToMarkdownTables(raw) {
+  const lines = raw.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const cols = lines[i].split("\t").length;
+    if (cols >= 2) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].split("\t").length === cols) j++;
+      if (j - i >= 2) {
+        const rows = lines.slice(i, j).map((l) => l.split("\t").map((c) => c.trim().replace(/\|/g, "\\|")));
+        out.push("| " + rows[0].join(" | ") + " |");
+        out.push("| " + rows[0].map(() => "---").join(" | ") + " |");
+        for (const row of rows.slice(1)) out.push("| " + row.join(" | ") + " |");
+        i = j;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join("\n");
+}
+
 function looksLikeMarkdown(s) {
   if (MARKDOWN_SIGNALS.some((re) => re.test(s))) return true;
   // A table needs its own two-line check — a header row plus its separator
@@ -2135,6 +2173,12 @@ function looksLikeMarkdown(s) {
 async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html = null } = {}) {
   if (!cleanable || !el.clean.checked) return { text: raw, tree: null };
 
+  // Only used for detection/parsing below, never for the flat-text
+  // fallback further down — that one should still show the original raw
+  // text a user actually copied, tabs and all, not a synthetic table it
+  // was rewritten into for parsing purposes.
+  const md = tsvBlocksToMarkdownTables(raw);
+
   // A document can have real Markdown syntax (headings, a "---" rule, bold
   // text) everywhere *except* its table — some sources keep a genuine
   // <table> in their clipboard HTML while flattening those same rows to
@@ -2147,9 +2191,9 @@ async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html =
   // and inline formatting more faithfully than a third party's clipboard
   // HTML.
   let mdTree = null;
-  if (forceMarkdown || looksLikeMarkdown(raw)) {
+  if (forceMarkdown || looksLikeMarkdown(md)) {
     try {
-      mdTree = await markdownToDom(raw);
+      mdTree = await markdownToDom(md);
     } catch (err) {
       toast("Couldn't load the Markdown renderer — this needs a network connection. Showing raw text.");
       return { text: raw, tree: null };
@@ -2172,11 +2216,11 @@ async function prepareDoc(raw, { forceMarkdown = false, cleanable = true, html =
     return { text: null, tree: preferHtml ? htmlTree : (mdTree || htmlTree) };
   }
 
-  if (!forceMarkdown && !looksLikeMarkdown(raw)) return { text: raw, tree: null };
+  if (!forceMarkdown && !looksLikeMarkdown(md)) return { text: raw, tree: null };
 
   // Nothing parsed into blocks. Fall back to stripping the syntax so the
   // symbols still are not read aloud, and never hand back an empty document.
-  const cleaned = stripMarkdown(raw);
+  const cleaned = stripMarkdown(md);
   return { text: cleaned.trim() ? cleaned : raw, tree: null };
 }
 
