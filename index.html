@@ -448,6 +448,47 @@
   }
   #toast.on { opacity: 1; }
 
+  /* Sits just above the player bar rather than overlapping it — this is a
+     decision to make (paste this or not), not a passing status message, so
+     it needs its own room instead of sharing the toast's spot. */
+  #clipPrompt {
+    position: fixed; z-index: 35;
+    left: 50%; bottom: calc(26px + var(--safe-bottom) + 118px); transform: translateX(-50%);
+    width: min(420px, calc(100vw - 32px));
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 14px; box-shadow: var(--shadow-lg);
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #clipPromptText {
+    flex: 1; min-width: 0; font-size: 13px; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* These two are styled entirely here rather than borrowing .ic/.pill:
+     .ic hard-sets a 34px square for icon glyphs, which silently clipped
+     "Not now" down to a third of its width. The preview text, which has an
+     ellipsis, is the only thing in this row that should give up space. */
+  #clipPromptActions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  #clipPromptDismiss, #clipPromptPaste { flex-shrink: 0; }
+  #clipPromptDismiss {
+    appearance: none; border: 0; background: transparent; color: var(--muted);
+    font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    padding: 6px 8px; border-radius: 8px; transition: background .12s, color .12s;
+    white-space: nowrap;
+  }
+  #clipPromptDismiss:hover { background: var(--chip); color: var(--text); }
+  #clipPromptPaste {
+    appearance: none; border: 0; cursor: pointer;
+    font: inherit; font-size: 12.5px; font-weight: 700;
+    padding: 7px 14px; border-radius: 10px;
+    background: var(--accent); color: var(--accent-ink);
+    transition: box-shadow .12s;
+    white-space: nowrap;
+  }
+  #clipPromptPaste:hover {
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+
   /* On a phone the sheet metaphor just wastes the width the text needs, so
      the panel goes full-bleed: no gutters, no radius, no shadow, and tall
      enough to cover the screen even when the document is short. */
@@ -604,6 +645,14 @@
 
 <div id="drop"><div>Drop a .txt, .md, .pdf, or .epub file to read it</div></div>
 <div id="toast"></div>
+
+<div id="clipPrompt" class="hidden" role="status">
+  <div id="clipPromptText"></div>
+  <div id="clipPromptActions">
+    <button id="clipPromptDismiss" title="Dismiss">Not now</button>
+    <button id="clipPromptPaste" title="Paste this in">Paste</button>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -2783,6 +2832,49 @@ function handlePastedText(text, html = null) {
     html,
   });
 }
+
+/**
+ * Called from Android's MainActivity.onResume(), on every return to the
+ * app — not just a cold launch, since this only ever suggests a paste
+ * rather than performing one, so there's nothing destructive about
+ * checking often. Silently auto-pasting here instead would risk wiping an
+ * in-progress read every time the app came back to the foreground with
+ * unrelated clipboard contents (an address copied for maps, an OTP, a
+ * link) — asking first costs one tap and avoids all of that.
+ *
+ * `lastClipPrompt` remembers the last clipboard text this was already
+ * shown for (accepted or dismissed either way), so returning to the app
+ * repeatedly without copying anything new doesn't re-show the same offer
+ * every time. It also skips text identical to what's already loaded, for
+ * the same reason.
+ */
+let lastClipPrompt = null;
+let pendingClip = null;
+const clipPrompt = document.getElementById("clipPrompt");
+const clipPromptText = document.getElementById("clipPromptText");
+
+function checkClipboardOnResume() {
+  if (!window.AndroidTTS?.readClipboardText) return;
+  const text = window.AndroidTTS.readClipboardText();
+  if (!text || !text.trim()) return;
+  if (text === lastClipPrompt || text === app.raw?.text) return;
+
+  pendingClip = { text, html: window.AndroidTTS.readClipboardHtml?.() || null };
+  const preview = text.trim().replace(/\s+/g, " ").slice(0, 40);
+  clipPromptText.textContent = `Paste "${preview}${text.trim().length > 40 ? "…" : ""}"?`;
+  clipPrompt.classList.remove("hidden");
+}
+
+function dismissClipPrompt(accept) {
+  clipPrompt.classList.add("hidden");
+  if (!pendingClip) return;
+  lastClipPrompt = pendingClip.text;
+  if (accept) handlePastedText(pendingClip.text, pendingClip.html);
+  pendingClip = null;
+}
+
+document.getElementById("clipPromptPaste").addEventListener("click", () => dismissClipPrompt(true));
+document.getElementById("clipPromptDismiss").addEventListener("click", () => dismissClipPrompt(false));
 
 pasteCatcher.addEventListener("paste", (e) => {
   e.preventDefault();

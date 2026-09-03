@@ -109,7 +109,17 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 if (insetScript != null) view.evaluateJavascript(insetScript, null);
                 pageReady = true;
+                // onResume() already fired once before this, on the cold-start
+                // path — too early for pageReady to be true yet, so a fresh
+                // launch would otherwise never get the one check that matters
+                // most (you copied something, then opened the app for it).
+                // Skipped when a Share just delivered content on this same
+                // launch — surfacing an unrelated "paste this?" banner right
+                // on top of content the user just deliberately shared in
+                // would read as noise, not help.
+                boolean hadShare = pendingSharedText != null;
                 deliverPendingShare();
+                if (!hadShare) view.evaluateJavascript("checkClipboardOnResume()", null);
             }
         });
 
@@ -235,6 +245,19 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
         else super.onBackPressed();
+    }
+
+    /*
+     * Checked on every return to the foreground, not just a cold launch —
+     * checkClipboardOnResume() only ever offers a paste, never performs one
+     * on its own, so there is nothing destructive about asking often. The
+     * page itself decides whether anything has actually changed since the
+     * last time it asked.
+     */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pageReady) web.evaluateJavascript("checkClipboardOnResume()", null);
     }
 
     @Override
