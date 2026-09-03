@@ -1883,6 +1883,104 @@ function togglePlayback() {
   else app.engine.speak(app.chunks, { startIndex: 0, tokensByChunk: app.tokensByChunk });
 }
 
+/* ---- voice list organisation ---- */
+
+// Wrapped in try/catch at both construction and every .of() call: an old,
+// non-Play-Store-updated Android WebView may lack Intl.DisplayNames
+// entirely, and even where it exists, .of() can throw on a malformed tag.
+// Either way this must degrade to the raw tag, never break voice population.
+let _langDisplayNames = null;
+try {
+  if (typeof Intl !== "undefined" && Intl.DisplayNames) {
+    _langDisplayNames = new Intl.DisplayNames([navigator.language || "en"], { type: "language" });
+  }
+} catch { _langDisplayNames = null; }
+const _langNameCache = new Map();
+
+/** "en-GB" -> "British English"; falls back to the raw tag, and empty/
+ *  missing tags become "Other voices" so they share one bucket instead of
+ *  each getting their own blank-labeled group. */
+function langDisplayName(tag) {
+  if (!tag) return "Other voices";
+  if (_langNameCache.has(tag)) return _langNameCache.get(tag);
+  let name = tag;
+  if (_langDisplayNames) {
+    try { name = _langDisplayNames.of(tag) || tag; } catch {}
+  }
+  _langNameCache.set(tag, name);
+  return name;
+}
+
+/**
+ * Renders `items` ([{ value, label, lang, local }]) into `selectEl` grouped
+ * into <optgroup>s by language. Only reorders/nests options — `value` stays
+ * exactly what the caller computed (a getVoices() index for desktop, a
+ * stable name string for Android), so selection logic downstream is
+ * untouched.
+ *
+ * Groups: English tags first (matches the existing default-voice heuristic
+ * and this app's realistic majority case), then everything else
+ * alphabetically by display name, with unknown/empty-tag voices in one
+ * "Other voices" group at the end. Within a group: local/offline voices
+ * before network ones (this app is offline-first elsewhere — see the
+ * existing "prefer local" default-voice heuristic), then alphabetical.
+ *
+ * If every voice shares one language, no <optgroup> is created — grouping
+ * a single bucket would just add nesting with no payoff.
+ */
+function renderGroupedVoices(selectEl, items) {
+  const groups = new Map();
+  for (const item of items) {
+    const tag = (item.lang || "").trim();
+    const key = tag.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { tag, items: [] });
+    groups.get(key).items.push(item);
+  }
+
+  const list = [...groups.values()];
+  for (const g of list) {
+    g.items.sort((a, b) => (a.local !== b.local ? (a.local ? -1 : 1) : a.label.localeCompare(b.label)));
+    // Disambiguate only genuine collisions — e.g. Android shows just
+    // locale + network flag, never the voice's real name, so two local
+    // en-US voices render identical text unless numbered.
+    const counts = new Map();
+    for (const it of g.items) counts.set(it.label, (counts.get(it.label) || 0) + 1);
+    const seen = new Map();
+    for (const it of g.items) {
+      if (counts.get(it.label) > 1) {
+        const n = (seen.get(it.label) || 0) + 1;
+        seen.set(it.label, n);
+        it.label = `${it.label} (${n})`;
+      }
+    }
+  }
+
+  list.sort((a, b) => {
+    const aEn = /^en/i.test(a.tag), bEn = /^en/i.test(b.tag);
+    if (aEn !== bEn) return aEn ? -1 : 1;
+    if (!a.tag !== !b.tag) return a.tag ? -1 : 1;
+    return langDisplayName(a.tag).localeCompare(langDisplayName(b.tag));
+  });
+
+  const makeOption = (item) => {
+    const o = document.createElement("option");
+    o.value = item.value;
+    o.textContent = item.label;
+    return o;
+  };
+
+  const nodes = list.length > 1
+    ? list.map((g) => {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = langDisplayName(g.tag);
+        optgroup.append(...g.items.map(makeOption));
+        return optgroup;
+      })
+    : list.flatMap((g) => g.items.map(makeOption));
+
+  selectEl.replaceChildren(...nodes);
+}
+
 /* Prefer the native engine when running inside the Android app, since the
    WebView has no Web Speech API at all. Everything downstream is identical:
    both classes are producers of the same timing track. */
@@ -1912,20 +2010,19 @@ if (!Engine) {
   if (Engine === AndroidTtsEngine) {
     // The bridge reports when the platform engine has finished initialising;
     // asking for voices before that returns nothing.
+    let userPickedVoiceName = null;
+
     const fillAndroidVoices = () => {
       const voices = app.engine.listVoices();
       if (!voices.length) return;
-      el.voice.replaceChildren(
-        ...voices.map((v) => {
-          const o = document.createElement("option");
-          o.value = v.name;
-          o.textContent = `${v.locale}${v.network ? " (network)" : ""}`;
-          return o;
-        })
-      );
-      const local = voices.findIndex((v) => !v.network && /^en/i.test(v.locale));
-      el.voice.value = voices[local >= 0 ? local : 0].name;
-      app.engine.setVoiceByName(el.voice.value);
+      renderGroupedVoices(el.voice, voices.map((v) => ({
+        value: v.name, label: `${v.locale}${v.network ? " (network)" : ""}`, lang: v.locale, local: !v.network,
+      })));
+
+      let chosen = userPickedVoiceName && voices.find(v => v.name === userPickedVoiceName);
+      if (!chosen) chosen = voices.find(v => !v.network && /^en/i.test(v.locale)) || voices[0];
+      el.voice.value = chosen.name;
+      app.engine.setVoiceByName(chosen.name);
     };
 
     app.engine.onReady = fillAndroidVoices;
@@ -1933,22 +2030,31 @@ if (!Engine) {
 
     el.voice.addEventListener("change", () => {
       app.engine.setVoiceByName(el.voice.value);
+      userPickedVoiceName = el.voice.value;
     });
   } else {
     // Voices populate asynchronously — the first getVoices() call returns [].
+    let userPickedVoice = null; // { name, lang } once the user manually chooses one
+
     const loadVoices = () => {
       const voices = speechSynthesis.getVoices();
       if (!voices.length) return;
-      el.voice.replaceChildren(
-        ...voices.map((v, i) => {
-          const o = document.createElement("option");
-          o.value = i;
-          o.textContent = `${v.name}${v.localService ? "" : " (network)"}`;
-          return o;
-        })
-      );
-      const preferred = voices.findIndex(v => v.localService && /^en/i.test(v.lang));
-      el.voice.value = preferred >= 0 ? preferred : 0;
+      renderGroupedVoices(el.voice, voices.map((v, i) => ({
+        value: i, label: `${v.name}${v.localService ? "" : " (network)"}`, lang: v.lang, local: v.localService,
+      })));
+
+      // A later voiceschanged firing — e.g. while new system voices are still
+      // being installed — used to always re-apply the default heuristic
+      // here, silently overriding a voice the user had already picked
+      // mid-read. Once picked, that choice is now re-resolved against the
+      // fresh list by name+lang (indices aren't stable across getVoices()
+      // calls), so only the first population — or a picked voice actually
+      // disappearing — falls back to the default.
+      let index = userPickedVoice
+        ? voices.findIndex(v => v.name === userPickedVoice.name && v.lang === userPickedVoice.lang)
+        : -1;
+      if (index < 0) index = voices.findIndex(v => v.localService && /^en/i.test(v.lang));
+      el.voice.value = index >= 0 ? index : 0;
       app.engine.voice = voices[el.voice.value];
     };
 
@@ -1956,7 +2062,9 @@ if (!Engine) {
     speechSynthesis.addEventListener("voiceschanged", loadVoices);
 
     el.voice.addEventListener("change", () => {
-      app.engine.voice = speechSynthesis.getVoices()[el.voice.value];
+      const v = speechSynthesis.getVoices()[el.voice.value];
+      app.engine.voice = v;
+      userPickedVoice = v ? { name: v.name, lang: v.lang } : null;
     });
   }
 
